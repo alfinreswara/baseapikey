@@ -112,7 +112,7 @@ jobs:
           version: v0.74.0
 
       - name: Upload release SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: baseapikey-${{ matrix.service }}-${{ inputs.version }}-sbom
           path: baseapikey-${{ matrix.service }}-${{ inputs.version }}.cdx.json
