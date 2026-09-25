@@ -39,8 +39,8 @@
   },
   "devDependencies": {
     "@baseapikey/config": "workspace:*",
-    "@types/node": "^20.14.10",
-    "tsx": "^4.19.0",
-    "typescript": "^5.5.4"
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }
