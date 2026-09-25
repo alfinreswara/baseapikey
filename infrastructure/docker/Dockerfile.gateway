@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:24-bookworm-slim AS builder
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
+
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/gateway/package.json apps/gateway/package.json
+COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY apps/docs-site/package.json apps/docs-site/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/database/package.json packages/database/package.json
+COPY packages/logger/package.json packages/logger/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+COPY apps/gateway apps/gateway
+COPY packages packages
+
+RUN pnpm --filter @baseapikey/gateway... build
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm --filter @baseapikey/gateway deploy --prod /runtime/gateway
+RUN node /runtime/gateway/node_modules/prisma/build/index.js generate \
+    --schema=/runtime/gateway/node_modules/@baseapikey/database/prisma/schema.prisma
+
+FROM node:24-bookworm-slim AS runtime
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOST=0.0.0.0
+
+RUN groupadd --system --gid 10001 baseapikey \
+    && useradd --system --uid 10001 --gid baseapikey --home-dir /app --shell /usr/sbin/nologin baseapikey
+
+WORKDIR /app
+
+COPY --from=builder --chown=baseapikey:baseapikey /runtime/gateway ./
+
+USER baseapikey
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+CMD ["node", "dist/index.js"]

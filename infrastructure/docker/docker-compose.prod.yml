@@ -1,0 +1,192 @@
+name: baseapikey-production
+
+x-gateway-environment: &gateway-environment
+  NODE_ENV: production
+  PORT: 3000
+  HOST: 0.0.0.0
+  TRUST_PROXY: ${TRUST_PROXY:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-baseapikey}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-baseapikey}
+  DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+  REDIS_URL: redis://redis:6379
+  REDIS_CONNECT_TIMEOUT_MS: ${REDIS_CONNECT_TIMEOUT_MS:-5000}
+  USAGE_QUEUE_BATCH_SIZE: ${USAGE_QUEUE_BATCH_SIZE:-50}
+  USAGE_QUEUE_INTERVAL_MS: ${USAGE_QUEUE_INTERVAL_MS:-250}
+  LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-5}
+  LOGIN_RATE_LIMIT_WINDOW_MS: ${LOGIN_RATE_LIMIT_WINDOW_MS:-900000}
+  HEALTH_CHECK_TIMEOUT_MS: ${HEALTH_CHECK_TIMEOUT_MS:-5000}
+  MODEL_CATALOG_CACHE_TTL_SECONDS: ${MODEL_CATALOG_CACHE_TTL_SECONDS:-300}
+  PROVIDER_HEALTH_CHECK_INTERVAL_MS: ${PROVIDER_HEALTH_CHECK_INTERVAL_MS:-60000}
+  METRICS_TOKEN: ${METRICS_TOKEN:?METRICS_TOKEN is required}
+  DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?DASHBOARD_PUBLIC_URL is required}
+  ERROR_REPORTING_WEBHOOK_URL: ${ERROR_REPORTING_WEBHOOK_URL:?ERROR_REPORTING_WEBHOOK_URL is required}
+  ERROR_REPORTING_WEBHOOK_SECRET: ${ERROR_REPORTING_WEBHOOK_SECRET:?ERROR_REPORTING_WEBHOOK_SECRET is required}
+  EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: ${EMAIL_VERIFICATION_TOKEN_TTL_SECONDS:-86400}
+  PASSWORD_RESET_TOKEN_TTL_SECONDS: ${PASSWORD_RESET_TOKEN_TTL_SECONDS:-900}
+  ACCOUNT_EMAIL_WEBHOOK_URL: ${ACCOUNT_EMAIL_WEBHOOK_URL:?ACCOUNT_EMAIL_WEBHOOK_URL is required}
+  ACCOUNT_EMAIL_WEBHOOK_SECRET: ${ACCOUNT_EMAIL_WEBHOOK_SECRET:?ACCOUNT_EMAIL_WEBHOOK_SECRET is required}
+  ACCOUNT_EMAIL_WEBHOOK_TIMEOUT_MS: ${ACCOUNT_EMAIL_WEBHOOK_TIMEOUT_MS:-5000}
+  NINE_ROUTER_API_KEY: ${NINE_ROUTER_API_KEY:?NINE_ROUTER_API_KEY is required}
+  NINE_ROUTER_BASE_URL: ${NINE_ROUTER_BASE_URL:-https://api.9router.com/v1}
+  PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:?PROVIDER_ENCRYPTION_KEY is required}
+  BILLING_PROVIDER_NAME: ${BILLING_PROVIDER_NAME:-payment-provider}
+  BILLING_PROVIDER_URL: ${BILLING_PROVIDER_URL:?BILLING_PROVIDER_URL is required}
+  BILLING_PROVIDER_API_KEY: ${BILLING_PROVIDER_API_KEY:?BILLING_PROVIDER_API_KEY is required}
+  BILLING_PROVIDER_TIMEOUT_MS: ${BILLING_PROVIDER_TIMEOUT_MS:-10000}
+  BILLING_WEBHOOK_SECRET: ${BILLING_WEBHOOK_SECRET:?BILLING_WEBHOOK_SECRET is required}
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+  JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+  JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+  CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+  MAX_REQUEST_SIZE: ${MAX_REQUEST_SIZE:-1048576}
+
+x-gateway-image: &gateway-image
+  image: baseapikey-gateway:${IMAGE_TAG:-local}
+  build:
+    context: ../..
+    dockerfile: infrastructure/docker/Dockerfile.gateway
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-baseapikey}
+      POSTGRES_USER: ${POSTGRES_USER:-baseapikey}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  migrate:
+    <<: *gateway-image
+    restart: 'no'
+    environment: *gateway-environment
+    command:
+      - node
+      - node_modules/prisma/build/index.js
+      - migrate
+      - deploy
+      - --schema=node_modules/@baseapikey/database/prisma/schema.prisma
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  gateway:
+    <<: *gateway-image
+    restart: unless-stopped
+    environment: *gateway-environment
+    ports:
+      - '${GATEWAY_PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - backend
+
+  dashboard:
+    image: baseapikey-dashboard:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.dashboard
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DASHBOARD_PORT: 3001
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?DASHBOARD_PUBLIC_URL is required}
+      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:?GATEWAY_PUBLIC_URL is required}
+    ports:
+      - '${DASHBOARD_PORT:-3001}:3001'
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="BaseAPIKey AI gateway operations dashboard" />
+    <title>BaseAPIKey Console</title>
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/config.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+
+    <main id="auth-screen" class="auth-shell">
+      <section class="auth-story">
+        <a class="brand" href="/" aria-label="BaseAPIKey home">
+          <span class="brand-mark">B</span><span>BaseAPIKey</span>
+        </a>
+        <div class="story-copy">
+          <p class="eyebrow">ONE KEY. EVERY MODEL.</p>
+          <h1>AI infrastructure,<br /><span>without the drag.</span></h1>
+          <p class="lede">
+            Route, measure, and control every model request from one calm operations surface.
+          </p>
+          <div class="signal-card">
+            <div class="signal-head">
+              <span>LIVE ROUTING</span><span class="status-dot">Operational</span>
+            </div>
+            <div class="route-line">
+              <span>Application</span><b>→</b><span class="route-node">BaseAPIKey</span><b>→</b
+              ><span>Best provider</span>
+            </div>
+          </div>
+        </div>
+        <p class="auth-foot">Built for teams that ship AI products.</p>
+      </section>
+
+      <section class="auth-panel">
+        <form id="login-form" class="auth-card">
+          <p class="eyebrow">WELCOME BACK</p>
+          <h2>Sign in to your console</h2>
+          <p class="muted">Manage keys, usage, providers, and billing.</p>
+          <label
+            >Email<input
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+              placeholder="you@company.com"
+          /></label>
+          <label
+            >Password<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              minlength="8"
+              placeholder="••••••••••••"
+          /></label>
+          <button class="primary wide" type="submit">Continue <span>→</span></button>
+          <p class="switch-copy">
+            New to BaseAPIKey?
+            <button type="button" class="text-button" data-auth-view="register">
+              Create an account
+            </button>
+          </p>
+        </form>
+
+        <form id="register-form" class="auth-card hidden">
+          <p class="eyebrow">GET STARTED</p>
+          <h2>Create your account</h2>
+          <div class="field-grid">
+            <label>Full name<input name="fullName" required maxlength="255" /></label>
+            <label>Username<input name="username" required minlength="3" maxlength="64" /></label>
+          </div>
+          <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+          <label
+            >Password<input
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              required
+              minlength="12"
+          /></label>
+          <button class="primary wide" type="submit">Create account <span>→</span></button>
+          <p class="switch-copy">
+            Already registered?
+            <button type="button" class="text-button" data-auth-view="login">Sign in</button>
+          </p>
+        </form>
+      </section>
+    </main>
+
+    <div id="console" class="console hidden">
+      <aside class="sidebar">
+        <div class="brand sidebar-brand">
+          <span class="brand-mark">B</span><span>BaseAPIKey</span>
+        </div>
+        <div class="org-switcher">
+          <span id="org-avatar" class="org-avatar">O</span>
+          <select id="organization-select" aria-label="Active organization"></select>
+        </div>
+        <nav id="main-nav" aria-label="Main navigation">
+          <button class="nav-item active" data-view="overview"><span>◫</span>Overview</button>
+          <button class="nav-item" data-view="keys"><span>⌁</span>API keys</button>
+          <button class="nav-item" data-view="usage"><span>↗</span>Usage</button>
+          <button class="nav-item" data-view="models"><span>◇</span>Models</button>
+          <p class="nav-label">ORGANIZATION</p>
+          <button class="nav-item" data-view="team"><span>♙</span>Team</button>
+          <button class="nav-item" data-view="billing"><span>▣</span>Billing</button>
+          <button class="nav-item admin-only hidden" data-view="admin"><span>✦</span>Admin</button>
+        </nav>
+        <div class="sidebar-foot">
+          <button class="profile-chip" id="profile-button">
+            <span id="user-avatar">U</span
+            ><span><b id="user-name">User</b><small id="user-email"></small></span>
+          </button>
+          <button id="logout-button" class="icon-button" title="Sign out">↪</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-kicker">OPERATIONS</p>
+            <h1 id="page-title">Overview</h1>
+          </div>
+          <div class="top-actions">
+            <span id="api-status" class="status-pill"><i></i>Checking API</span
+            ><button id="refresh-button" class="secondary">Refresh</button
+            ><button class="primary view-action" data-action="create-key">Create key</button>
+          </div>
+        </header>
+
+        <section id="view-overview" class="view active-view">
+          <div id="overview-metrics" class="metric-grid skeleton-grid"></div>
+          <div class="content-grid">
+            <article class="panel chart-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">REQUEST VOLUME</p>
+                  <h3>Usage over time</h3>
+                </div>
+                <span class="subtle">Last 30 days</span>
+              </div>
+              <div id="usage-chart" class="chart-empty">
+                Usage data will appear after your first request.
+              </div>
+            </article>
+            <article class="panel quickstart">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">QUICK START</p>
+                  <h3>Make your first call</h3>
+                </div>
+                <button id="copy-snippet" class="icon-button">Copy</button>
+              </div>
+              <pre><code id="quickstart-code">curl https://api.example.com/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"your-model","messages":[{"role":"user","content":"Hello"}]}'</code></pre>
+            </article>
+          </div>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">RECENT ACTIVITY</p>
+                <h3>Latest requests</h3>
+              </div>
+              <button class="text-button" data-view-link="usage">View all</button>
+            </div>
+            <div id="recent-usage"></div>
+          </article>
+        </section>
+
+        <section id="view-keys" class="view">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">CREDENTIALS</p>
+                <h3>API keys</h3>
+                <p class="muted">Keys belong to the active organization.</p>
+              </div>
+              <button class="primary" data-action="create-key">Create key</button>
+            </div>
+            <div id="keys-table"></div>
+          </article>
+        </section>
+
+        <section id="view-usage" class="view">
+          <div id="usage-metrics" class="metric-grid"></div>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">REQUEST LOG</p>
+                <h3>Usage history</h3>
+              </div>
+              <select id="usage-range">
+                <option value="7">7 days</option>
+                <option value="30" selected>30 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </div>
+            <div id="usage-table"></div>
+          </article>
+        </section>
+
+        <section id="view-models" class="view">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">CATALOG</p>
+                <h3>Available models</h3>
+              </div>
+              <input
+                id="model-search"
+                class="compact-input"
+                type="search"
+                placeholder="Search models"
+              />
+            </div>
+            <div id="model-grid" class="model-grid"></div>
+          </article>
+        </section>
+
+        <section id="view-team" class="view">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">ACCESS</p>
+                <h3>Team members</h3>
+              </div>
+              <button class="primary" data-action="invite-member">Invite member</button>
+            </div>
+            <div id="team-table"></div>
+          </article>
+        </section>
+
+        <section id="view-billing" class="view">
+          <div id="billing-metrics" class="metric-grid"></div>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">LEDGER</p>
+                <h3>Credit transactions</h3>
+              </div>
+              <button class="primary" data-action="buy-credits">Buy credits</button>
+            </div>
+            <div id="billing-table"></div>
+          </article>
+        </section>
+
+        <section id="view-admin" class="view">
+          <div id="admin-metrics" class="metric-grid"></div>
+          <div class="content-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">INFRASTRUCTURE</p>
+                  <h3>Providers</h3>
+                </div>
+                <button class="primary" data-action="add-provider">Add provider</button>
+              </div>
+              <div id="provider-table"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">SECURITY</p>
+                  <h3>Audit activity</h3>
+                </div>
+              </div>
+              <div id="audit-table"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="app-dialog">
+      <form method="dialog" id="dialog-form">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow" id="dialog-kicker">CREATE</p>
+            <h2 id="dialog-title">New item</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div id="dialog-fields"></div>
+        <div class="dialog-actions">
+          <button class="secondary" value="cancel">Cancel</button
+          ><button class="primary" id="dialog-submit" value="default">Save</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

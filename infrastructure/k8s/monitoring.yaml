@@ -1,0 +1,42 @@
+# These resources require the Prometheus Operator. Omit this file if your cluster uses another monitor.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gateway
+  namespace: baseapikey
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      authorization:
+        credentials:
+          name: baseapikey-secrets
+          key: METRICS_TOKEN
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: baseapikey-alerts
+  namespace: baseapikey
+spec:
+  groups:
+    - name: baseapikey.availability
+      rules:
+        - alert: BaseAPIKeyHighErrorRate
+          expr: sum(rate(baseapikey_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(baseapikey_http_requests_total[5m])), 1) > 0.05
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Gateway HTTP 5xx rate is above 5%
+        - alert: BaseAPIKeyNoGatewayReplicas
+          expr: kube_deployment_status_replicas_available{namespace="baseapikey",deployment="gateway"} < 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: No BaseAPIKey Gateway replica is available

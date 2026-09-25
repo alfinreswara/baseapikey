@@ -1,0 +1,21 @@
+{
+  "name": "@baseapikey/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit",
+    "test": "tsx src/dashboard.test.ts",
+    "test:e2e": "pnpm build && playwright test"
+  },
+  "devDependencies": {
+    "@baseapikey/config": "workspace:*",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:24-bookworm-slim AS builder
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
+WORKDIR /workspace
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY packages/config/package.json packages/config/package.json
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm install --frozen-lockfile
+COPY apps/dashboard apps/dashboard
+COPY packages/config packages/config
+RUN pnpm --filter @baseapikey/dashboard build
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production
+ENV DASHBOARD_PORT=3001
+ENV DASHBOARD_HOST=0.0.0.0
+RUN groupadd --system --gid 10001 baseapikey \
+  && useradd --system --uid 10001 --gid baseapikey --home-dir /app --shell /usr/sbin/nologin baseapikey
+WORKDIR /app
+COPY --from=builder --chown=baseapikey:baseapikey /workspace/apps/dashboard/dist ./dist
+COPY --from=builder --chown=baseapikey:baseapikey /workspace/apps/dashboard/public ./public
+USER baseapikey
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "dist/server.js"]

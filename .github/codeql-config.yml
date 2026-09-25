@@ -1,0 +1,8 @@
+name: BaseAPIKey CodeQL configuration
+
+paths-ignore:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/coverage/**'
+  - 'apps/dashboard/test-results/**'
+  - 'apps/dashboard/playwright-report/**'

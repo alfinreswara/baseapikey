@@ -1,0 +1,16 @@
+{
+  "name": "@baseapikey/docs-site",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"docs-site build\"",
+    "dev": "echo \"docs-site dev\"",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit",
+    "test": "echo \"docs-site test\""
+  },
+  "devDependencies": {
+    "@baseapikey/config": "workspace:*",
+    "typescript": "^5.5.4"
+  }
+}

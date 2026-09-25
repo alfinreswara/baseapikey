@@ -1,0 +1,46 @@
+{
+  "name": "@baseapikey/database",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "scripts": {
+    "build": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/baseapikey\" prisma generate && tsc",
+    "db:generate": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/baseapikey\" prisma generate",
+    "db:validate": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/baseapikey\" prisma validate",
+    "db:format": "prisma format",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "dev": "echo \"database dev\"",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit",
+    "test": "tsx src/client.test.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "prisma": "^5.22.0"
+  },
+  "devDependencies": {
+    "@baseapikey/config": "workspace:*",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

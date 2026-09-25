@@ -1,0 +1,34 @@
+{
+  "name": "@baseapikey/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit",
+    "test": "tsx src/app.test.ts && tsx src/modules/health/health.test.ts && tsx src/modules/auth/auth.test.ts && tsx src/modules/auth/redis-rate-limiter.test.ts && tsx src/modules/auth/register.test.ts && tsx src/modules/auth/login.test.ts && tsx src/modules/auth/refresh.test.ts && tsx src/modules/auth/logout.test.ts && tsx src/modules/auth/middleware.test.ts && tsx src/modules/auth/rbac.test.ts && tsx src/modules/auth/session.test.ts && tsx src/modules/auth/integration.test.ts && tsx src/modules/account/account.test.ts && tsx src/modules/organizations/organization.test.ts && tsx src/modules/billing/billing.test.ts && tsx src/modules/admin/admin.test.ts && tsx src/modules/api-keys/api-key.test.ts && tsx src/modules/api-keys/api-key-middleware.test.ts && tsx src/modules/api-keys/api-key-management.test.ts && tsx src/modules/api-keys/api-key-permissions.test.ts && tsx src/modules/api-keys/api-key-rotation.test.ts && tsx src/modules/api-keys/api-key-revocation.test.ts && tsx src/modules/usage/usage-tracking.test.ts && tsx src/modules/usage/usage-analytics.test.ts && tsx src/modules/usage/usage-production.test.ts && tsx src/modules/quota/quota.test.ts && tsx src/modules/api-keys/api-key-lifecycle-integration.test.ts && tsx src/modules/providers/provider.test.ts && tsx src/modules/providers/provider-registry.test.ts && tsx src/modules/providers/9router.test.ts && tsx src/modules/providers/resilience/resilient-provider-router.test.ts && tsx src/modules/models/models.test.ts && tsx src/modules/chat/chat.test.ts && tsx src/modules/inference/inference.test.ts"
+  },
+  "dependencies": {
+    "@baseapikey/database": "workspace:*",
+    "@baseapikey/logger": "workspace:*",
+    "@baseapikey/shared": "workspace:*",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "argon2": "^0.45.1",
+    "fastify": "^5.12.5",
+    "jsonwebtoken": "^9.0.3",
+    "prisma": "^5.22.0",
+    "redis": "^5.12.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@baseapikey/config": "workspace:*",
+    "@types/jsonwebtoken": "^9.0.8",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

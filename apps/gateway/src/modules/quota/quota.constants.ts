@@ -1,0 +1,12 @@
+export const DEFAULT_QUOTA_LIMITS = {
+  REQUESTS_PER_MINUTE: 60,
+  REQUESTS_PER_DAY: 10_000,
+  TOKENS_PER_DAY: 5_000_000,
+  MONTHLY_BUDGET_USD: 100.0,
+} as const;
+
+export const QUOTA_RESET_INTERVALS = {
+  MINUTE_MS: 60 * 1000,
+  DAY_MS: 24 * 60 * 60 * 1000,
+  MONTH_MS: 30 * 24 * 60 * 60 * 1000,
+} as const;

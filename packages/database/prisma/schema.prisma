@@ -1,0 +1,534 @@
+// ==============================================================================
+// BaseAPIKey Prisma Database Schema
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==============================================================================
+// Enums
+// ==============================================================================
+
+enum UserRole {
+  USER
+  ADMIN
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+
+  @@map("user_status")
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+
+  @@map("api_key_status")
+}
+
+enum ProviderStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+
+  @@map("provider_status")
+}
+
+enum ModelCategory {
+  CHAT
+  EMBEDDING
+  IMAGE
+  AUDIO
+  VISION
+
+  @@map("model_category")
+}
+
+enum AuditSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+
+  @@map("audit_severity")
+}
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+
+  @@map("organization_role")
+}
+
+enum OrganizationPlan {
+  FREE
+  PRO
+  ENTERPRISE
+
+  @@map("organization_plan")
+}
+
+enum OrganizationMemberStatus {
+  INVITED
+  ACTIVE
+
+  @@map("organization_member_status")
+}
+
+enum ProviderHealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  DOWN
+
+  @@map("provider_health_status")
+}
+
+enum BillingAccountStatus {
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CLOSED
+
+  @@map("billing_account_status")
+}
+
+enum BillingInvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+
+  @@map("billing_invoice_status")
+}
+
+enum CreditTransactionType {
+  PURCHASE
+  USAGE
+  ADJUSTMENT
+  REFUND
+
+  @@map("credit_transaction_type")
+}
+
+// ==============================================================================
+// Models
+// ==============================================================================
+
+model User {
+  id                      String                      @id @default(uuid()) @db.Uuid
+  email                   String                      @unique @db.VarChar(255)
+  username                String                      @unique @db.VarChar(255)
+  fullName                String                      @map("full_name") @db.VarChar(255)
+  passwordHash            String                      @map("password_hash") @db.VarChar(255)
+  role                    UserRole                    @default(USER)
+  status                  UserStatus                  @default(ACTIVE)
+  emailVerified           Boolean                     @default(false) @map("email_verified")
+  avatarUrl               String?                     @map("avatar_url") @db.Text
+  lastLoginAt             DateTime?                   @map("last_login_at") @db.Timestamptz()
+  createdAt               DateTime                    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt               DateTime                    @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt               DateTime?                   @map("deleted_at") @db.Timestamptz()
+  apiKeys                 ApiKey[]
+  usages                  Usage[]
+  auditLogs               AuditLog[]
+  sessions                Session[]
+  ownedOrganizations      Organization[]              @relation("OrganizationOwner")
+  organizationMemberships OrganizationMember[]        @relation("OrganizationMemberUser")
+  sentOrganizationInvites OrganizationMember[]        @relation("OrganizationMemberInviter")
+  sentOrganizationInvitations OrganizationInvitation[] @relation("OrganizationInvitationInviter")
+  organizationPreference  UserOrganizationPreference?
+
+  @@index([status, role])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Organization {
+  id                 String           @id @default(uuid()) @db.Uuid
+  name               String           @db.VarChar(255)
+  slug               String           @unique @db.VarChar(100)
+  ownerId            String           @map("owner_id") @db.Uuid
+  billingEmail       String?          @map("billing_email") @db.VarChar(255)
+  plan               OrganizationPlan @default(FREE)
+  spendingLimitCents Int?             @map("spending_limit_cents")
+  isActive           Boolean          @default(true) @map("is_active")
+  metadata           Json             @default("{}")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt          DateTime?        @map("deleted_at") @db.Timestamptz()
+
+  owner             User                         @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  activePreferences UserOrganizationPreference[]
+  members           OrganizationMember[]
+  apiKeys           ApiKey[]
+  usages            Usage[]
+  auditLogs         AuditLog[]
+  billingAccount    BillingAccount?
+  invitations       OrganizationInvitation[]
+  usageDailyAggregates UsageDailyAggregate[]
+
+  @@index([ownerId])
+  @@index([isActive, deletedAt])
+  @@map("organizations")
+}
+
+model UserOrganizationPreference {
+  userId               String   @id @map("user_id") @db.Uuid
+  activeOrganizationId String   @map("active_organization_id") @db.Uuid
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeOrganization Organization @relation(fields: [activeOrganizationId], references: [id], onDelete: Cascade)
+
+  @@index([activeOrganizationId])
+  @@map("user_organization_preferences")
+}
+
+model OrganizationMember {
+  id             String                   @id @default(uuid()) @db.Uuid
+  organizationId String                   @map("organization_id") @db.Uuid
+  userId         String                   @map("user_id") @db.Uuid
+  role           OrganizationRole         @default(MEMBER)
+  status         OrganizationMemberStatus @default(ACTIVE)
+  invitedById    String?                  @map("invited_by_id") @db.Uuid
+  joinedAt       DateTime?                @default(now()) @map("joined_at") @db.Timestamptz()
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime                 @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation("OrganizationMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation("OrganizationMemberInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+  @@index([organizationId, role, status])
+  @@map("organization_members")
+}
+
+model OrganizationInvitation {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  email          String           @db.VarChar(255)
+  role           OrganizationRole @default(MEMBER)
+  tokenHash      String           @unique @map("token_hash") @db.VarChar(64)
+  invitedById    String           @map("invited_by_id") @db.Uuid
+  expiresAt      DateTime         @map("expires_at") @db.Timestamptz()
+  acceptedAt     DateTime?        @map("accepted_at") @db.Timestamptz()
+  revokedAt      DateTime?        @map("revoked_at") @db.Timestamptz()
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("OrganizationInvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([email, expiresAt])
+  @@index([organizationId, createdAt])
+  @@map("organization_invitations")
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash") @db.VarChar(255)
+  deviceId         String?   @map("device_id") @db.VarChar(255)
+  deviceName       String?   @map("device_name") @db.VarChar(255)
+  ipAddress        String?   @map("ip_address") @db.VarChar(45)
+  userAgent        String?   @map("user_agent") @db.Text
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz()
+  lastUsedAt       DateTime? @map("last_used_at") @db.Timestamptz()
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz()
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model ApiKey {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  name           String       @db.VarChar(255)
+  keyHash        String       @unique @map("key_hash") @db.VarChar(255)
+  keyPrefix      String       @map("key_prefix") @db.VarChar(32)
+  status         ApiKeyStatus @default(ACTIVE)
+  permissions    Json         @default("[]")
+  lastUsedAt     DateTime?    @map("last_used_at") @db.Timestamptz()
+  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz()
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz()
+  organizationId String?      @map("organization_id") @db.Uuid
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  usages       Usage[]
+  quota        ApiKeyQuota?
+  auditLogs    AuditLog[]
+
+  @@index([userId, status])
+  @@index([keyPrefix, status])
+  @@index([status])
+  @@index([deletedAt])
+  @@index([organizationId, status, createdAt])
+  @@map("api_keys")
+}
+
+model ApiKeyQuota {
+  id                    String   @id @default(uuid()) @db.Uuid
+  apiKeyId              String   @unique @map("api_key_id") @db.Uuid
+  requestsPerMinute     Int      @default(60) @map("requests_per_minute")
+  requestsPerDay        Int      @default(10000) @map("requests_per_day")
+  tokensPerDay          Int      @default(5000000) @map("tokens_per_day")
+  monthlyBudgetUsd      Decimal  @default(100.00) @map("monthly_budget_usd") @db.Decimal(12, 4)
+  currentRequestsMinute Int      @default(0) @map("current_requests_minute")
+  currentRequestsDay    Int      @default(0) @map("current_requests_day")
+  currentTokensDay      Int      @default(0) @map("current_tokens_day")
+  currentSpendUsd       Decimal  @default(0) @map("current_spend_usd") @db.Decimal(12, 4)
+  resetMinuteAt         DateTime @default(now()) @map("reset_minute_at") @db.Timestamptz()
+  resetDayAt            DateTime @default(now()) @map("reset_day_at") @db.Timestamptz()
+  resetMonthAt          DateTime @default(now()) @map("reset_month_at") @db.Timestamptz()
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([apiKeyId])
+  @@map("api_key_quotas")
+}
+
+model Usage {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  apiKeyId         String   @map("api_key_id") @db.Uuid
+  provider         String   @db.VarChar(100)
+  model            String   @db.VarChar(100)
+  endpoint         String   @db.VarChar(255)
+  requestId        String   @map("request_id") @db.VarChar(255)
+  promptTokens     Int      @default(0) @map("prompt_tokens")
+  completionTokens Int      @default(0) @map("completion_tokens")
+  totalTokens      Int      @default(0) @map("total_tokens")
+  estimatedCost    Decimal  @default(0) @map("estimated_cost") @db.Decimal(12, 6)
+  latencyMs        Int      @map("latency_ms")
+  statusCode       Int      @map("status_code")
+  clientIp         String?  @map("client_ip") @db.VarChar(45)
+  userAgent        String?  @map("user_agent") @db.Text
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  organizationId   String?  @map("organization_id") @db.Uuid
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKey       ApiKey        @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@index([provider, model])
+  @@index([requestId])
+  @@index([createdAt])
+  @@index([organizationId, createdAt])
+  @@map("usages")
+}
+
+model UsageDailyAggregate {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  date             DateTime @db.Date
+  provider         String   @db.VarChar(100)
+  model            String   @db.VarChar(100)
+  requestCount     Int      @default(0) @map("request_count")
+  successfulCount  Int      @default(0) @map("successful_count")
+  failedCount      Int      @default(0) @map("failed_count")
+  promptTokens     Int      @default(0) @map("prompt_tokens")
+  completionTokens Int      @default(0) @map("completion_tokens")
+  totalTokens      Int      @default(0) @map("total_tokens")
+  estimatedCost    Decimal  @default(0) @map("estimated_cost") @db.Decimal(14, 8)
+  latencyTotalMs   BigInt   @default(0) @map("latency_total_ms")
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, date, provider, model])
+  @@index([organizationId, date])
+  @@map("usage_daily_aggregates")
+}
+
+model Provider {
+  id                 String               @id @default(uuid()) @db.Uuid
+  name               String               @db.VarChar(255)
+  slug               String               @unique @db.VarChar(100)
+  baseUrl            String               @map("base_url") @db.Text
+  apiVersion         String?              @map("api_version") @db.VarChar(50)
+  encryptedApiKey    String               @map("encrypted_api_key") @db.Text
+  status             ProviderStatus       @default(ACTIVE)
+  priority           Int                  @default(100)
+  timeoutMs          Int                  @default(60000) @map("timeout_ms")
+  maxRetries         Int                  @default(2) @map("max_retries")
+  supportsStreaming  Boolean              @default(true) @map("supports_streaming")
+  supportsImages     Boolean              @default(false) @map("supports_images")
+  supportsEmbeddings Boolean              @default(false) @map("supports_embeddings")
+  supportsAudio      Boolean              @default(false) @map("supports_audio")
+  supportsVision     Boolean              @default(false) @map("supports_vision")
+  metadata           Json                 @default("{}")
+  healthStatus       ProviderHealthStatus @default(UNKNOWN) @map("health_status")
+  healthCheckedAt    DateTime?            @map("health_checked_at") @db.Timestamptz()
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz()
+
+  models AIModel[]
+
+  @@index([status, priority])
+  @@map("providers")
+}
+
+model AIModel {
+  id                      String        @id @default(uuid()) @db.Uuid
+  providerId              String        @map("provider_id") @db.Uuid
+  name                    String        @db.VarChar(255)
+  slug                    String        @db.VarChar(100)
+  displayName             String        @map("display_name") @db.VarChar(255)
+  category                ModelCategory @default(CHAT)
+  contextWindow           Int           @map("context_window")
+  maxOutputTokens         Int           @map("max_output_tokens")
+  inputPricePerMillion    Decimal       @map("input_price_per_million") @db.Decimal(12, 6)
+  outputPricePerMillion   Decimal       @map("output_price_per_million") @db.Decimal(12, 6)
+  supportsStreaming       Boolean       @default(true) @map("supports_streaming")
+  supportsVision          Boolean       @default(false) @map("supports_vision")
+  supportsFunctionCalling Boolean       @default(false) @map("supports_function_calling")
+  supportsJsonMode        Boolean       @default(false) @map("supports_json_mode")
+  supportsReasoning       Boolean       @default(false) @map("supports_reasoning")
+  isActive                Boolean       @default(true) @map("is_active")
+  metadata                Json          @default("{}")
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, slug])
+  @@index([providerId, isActive])
+  @@index([slug, isActive])
+  @@index([category, isActive])
+  @@map("ai_models")
+}
+
+model AuditLog {
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String?       @map("user_id") @db.Uuid
+  apiKeyId       String?       @map("api_key_id") @db.Uuid
+  action         String        @db.VarChar(100)
+  resource       String        @db.VarChar(100)
+  resourceId     String?       @map("resource_id") @db.VarChar(255)
+  ipAddress      String?       @map("ip_address") @db.VarChar(45)
+  userAgent      String?       @map("user_agent") @db.Text
+  requestId      String?       @map("request_id") @db.VarChar(255)
+  metadata       Json          @default("{}")
+  severity       AuditSeverity @default(INFO)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  organizationId String?       @map("organization_id") @db.Uuid
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey       ApiKey?       @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@index([action, severity])
+  @@index([createdAt])
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+model BillingAccount {
+  id                 String               @id @default(uuid()) @db.Uuid
+  organizationId     String               @unique @map("organization_id") @db.Uuid
+  status             BillingAccountStatus @default(ACTIVE)
+  currency           String               @default("USD") @db.VarChar(3)
+  creditBalanceCents Int                  @default(0) @map("credit_balance_cents")
+  unbilledUsageMicros Int                 @default(0) @map("unbilled_usage_micros")
+  externalCustomerId String?              @unique @map("external_customer_id") @db.VarChar(255)
+  currentPeriodStart DateTime             @default(now()) @map("current_period_start") @db.Timestamptz()
+  currentPeriodEnd   DateTime?            @map("current_period_end") @db.Timestamptz()
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoices     BillingInvoice[]
+  transactions CreditTransaction[]
+
+  @@index([status])
+  @@map("billing_accounts")
+}
+
+model BillingInvoice {
+  id                String               @id @default(uuid()) @db.Uuid
+  billingAccountId  String               @map("billing_account_id") @db.Uuid
+  externalInvoiceId String?              @unique @map("external_invoice_id") @db.VarChar(255)
+  status            BillingInvoiceStatus @default(DRAFT)
+  currency          String               @default("USD") @db.VarChar(3)
+  subtotalCents     Int                  @default(0) @map("subtotal_cents")
+  taxCents          Int                  @default(0) @map("tax_cents")
+  totalCents        Int                  @default(0) @map("total_cents")
+  invoiceUrl        String?              @map("invoice_url") @db.Text
+  periodStart       DateTime             @map("period_start") @db.Timestamptz()
+  periodEnd         DateTime             @map("period_end") @db.Timestamptz()
+  dueAt             DateTime?            @map("due_at") @db.Timestamptz()
+  paidAt            DateTime?            @map("paid_at") @db.Timestamptz()
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz()
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([billingAccountId, createdAt])
+  @@index([status, dueAt])
+  @@map("billing_invoices")
+}
+
+model CreditTransaction {
+  id                String                @id @default(uuid()) @db.Uuid
+  billingAccountId  String                @map("billing_account_id") @db.Uuid
+  type              CreditTransactionType
+  amountCents       Int                   @map("amount_cents")
+  balanceAfterCents Int                   @map("balance_after_cents")
+  idempotencyKey    String                @unique @map("idempotency_key") @db.VarChar(255)
+  description       String?               @db.Text
+  metadata          Json                  @default("{}")
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([billingAccountId, createdAt])
+  @@index([type, createdAt])
+  @@map("credit_transactions")
+}
+
+model BillingWebhookEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  provider        String    @db.VarChar(50)
+  providerEventId String    @map("provider_event_id") @db.VarChar(255)
+  eventType       String    @map("event_type") @db.VarChar(100)
+  payload         Json
+  processedAt     DateTime? @map("processed_at") @db.Timestamptz()
+  error           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@unique([provider, providerEventId])
+  @@index([processedAt, createdAt])
+  @@map("billing_webhook_events")
+}

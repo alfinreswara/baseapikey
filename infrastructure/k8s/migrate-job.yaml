@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: baseapikey-migrate
+  namespace: baseapikey
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/example/baseapikey-gateway:latest
+          command:
+            - node
+            - node_modules/prisma/build/index.js
+            - migrate
+            - deploy
+            - --schema=node_modules/@baseapikey/database/prisma/schema.prisma
+          envFrom:
+            - configMapRef:
+                name: baseapikey-config
+            - secretRef:
+                name: baseapikey-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
