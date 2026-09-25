@@ -37,7 +37,7 @@ jobs:
             dockerfile: infrastructure/docker/Dockerfile.dashboard
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate release request
         shell: bash
