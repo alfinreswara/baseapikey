@@ -34,8 +34,8 @@
     "test": "tsx src/client.test.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
-    "prisma": "^5.22.0"
+    "@prisma/client": "^7.10.0",
+    "prisma": "^7.10.0"
   },
   "devDependencies": {
     "@baseapikey/config": "workspace:*",

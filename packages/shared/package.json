@@ -23,7 +23,7 @@
     "test": "tsx src/env/env.test.ts"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@baseapikey/config": "workspace:*",
