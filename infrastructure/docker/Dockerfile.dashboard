@@ -13,17 +13,15 @@ COPY apps/dashboard apps/dashboard
 COPY packages/config packages/config
 RUN pnpm --filter @baseapikey/dashboard build
 
-FROM node:24-bookworm-slim AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d AS runtime
 ENV NODE_ENV=production
 ENV DASHBOARD_PORT=3001
 ENV DASHBOARD_HOST=0.0.0.0
-RUN groupadd --system --gid 10001 baseapikey \
-  && useradd --system --uid 10001 --gid baseapikey --home-dir /app --shell /usr/sbin/nologin baseapikey
 WORKDIR /app
-COPY --from=builder --chown=baseapikey:baseapikey /workspace/apps/dashboard/dist ./dist
-COPY --from=builder --chown=baseapikey:baseapikey /workspace/apps/dashboard/public ./public
-USER baseapikey
+COPY --from=builder --chown=nonroot:nonroot /workspace/apps/dashboard/dist ./dist
+COPY --from=builder --chown=nonroot:nonroot /workspace/apps/dashboard/public ./public
+USER nonroot
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-CMD ["node", "dist/server.js"]
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["dist/server.js"]

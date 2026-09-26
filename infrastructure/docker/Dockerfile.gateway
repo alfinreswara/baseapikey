@@ -30,24 +30,21 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 RUN node /runtime/gateway/node_modules/prisma/build/index.js generate \
     --schema=/runtime/gateway/node_modules/@baseapikey/database/prisma/schema.prisma
 
-FROM node:24-bookworm-slim AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d AS runtime
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
 
-RUN groupadd --system --gid 10001 baseapikey \
-    && useradd --system --uid 10001 --gid baseapikey --home-dir /app --shell /usr/sbin/nologin baseapikey
-
 WORKDIR /app
 
-COPY --from=builder --chown=baseapikey:baseapikey /runtime/gateway ./
+COPY --from=builder --chown=nonroot:nonroot /runtime/gateway ./
 
-USER baseapikey
+USER nonroot
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
-CMD ["node", "dist/index.js"]
+CMD ["dist/index.js"]
