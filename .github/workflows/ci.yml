@@ -29,8 +29,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -53,8 +51,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -77,8 +73,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -101,8 +95,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -137,8 +129,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -215,8 +205,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -258,8 +246,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
@@ -285,8 +271,6 @@ jobs:
 
       - name: Setup pnpm package manager
         uses: pnpm/action-setup@v6
-        with:
-          version: 11
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v7
