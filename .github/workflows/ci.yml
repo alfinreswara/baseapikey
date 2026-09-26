@@ -22,7 +22,7 @@ permissions:
 jobs:
   type-check:
     name: TypeScript Type Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -44,7 +44,7 @@ jobs:
 
   lint:
     name: ESLint Code Quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -66,7 +66,7 @@ jobs:
 
   format:
     name: Prettier Format Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -88,7 +88,7 @@ jobs:
 
   test:
     name: Automated Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -110,7 +110,7 @@ jobs:
 
   build:
     name: Build Applications & Packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs:
       [
         type-check,
@@ -198,7 +198,7 @@ jobs:
 
   dashboard-e2e:
     name: Dashboard Browser E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -223,7 +223,7 @@ jobs:
 
   migration-check:
     name: Prisma Migration Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -264,7 +264,7 @@ jobs:
 
   dependency-audit:
     name: Production Dependency Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -286,7 +286,7 @@ jobs:
 
   infrastructure-security:
     name: Infrastructure Misconfiguration Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -303,7 +303,7 @@ jobs:
 
   secret-scan:
     name: Repository Secret Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
