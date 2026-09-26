@@ -31,7 +31,7 @@
     "dev": "echo \"database dev\"",
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
-    "test": "tsx src/client.test.ts"
+    "test": "pnpm run db:generate && tsx src/client.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
