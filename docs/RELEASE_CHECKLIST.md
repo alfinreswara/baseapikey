@@ -31,6 +31,10 @@
 - [ ] Streaming cancellation, graceful shutdown, and usage queue drain are verified under load.
 - [ ] SIGTERM removes the pod from the Service through readiness, in-flight requests finish, and the
       process exits before `terminationGracePeriodSeconds` expires.
+- [ ] A streaming request over a real connection receives the SSE events and the `DONE` event, and a
+      client disconnect releases the upstream request.
+- [ ] A stream that is still running during the rollout ends with an error event instead of a
+      truncated response.
 
 ## Operations gates
 

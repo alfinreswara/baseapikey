@@ -17,6 +17,7 @@ import {
   requireAvailableBilling,
 } from '../billing/middleware/billing-usage.middleware';
 import type { ModelCatalogService } from '../models/services/model-catalog.service';
+import type { ResilientProviderRouter } from '../providers/resilience/resilient-provider-router';
 import { requireQuota } from '../quota/middleware/quota.middleware';
 import type { QuotaService } from '../quota/services/quota.service';
 
@@ -29,6 +30,8 @@ export interface InferenceRoutesOptions extends FastifyPluginOptions {
   userRepository?: IUserRepository;
   quotaService?: QuotaService;
   inferenceService?: InferenceService;
+  /** Router that also carries the service wide abort signal. */
+  resilientRouter?: ResilientProviderRouter;
   billingGuard?: IOrganizationBillingGuard;
   modelCatalogService?: ModelCatalogService;
 }
@@ -45,7 +48,7 @@ export async function inferenceRoutes(
       new InferenceService(
         options.providerRegistry,
         '9router',
-        undefined,
+        options.resilientRouter,
         options.modelCatalogService,
       ),
   );

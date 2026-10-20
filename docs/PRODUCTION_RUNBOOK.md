@@ -44,18 +44,44 @@ PostgreSQL and Redis before applying the manifests.
 
 The runtime images are distroless. They contain no shell, and the Node binary lives at
 `/nodejs/bin/node` instead of `PATH`, so no `preStop` hook can run a shell command. Kubernetes
-sends SIGTERM to the Node process instead, and both services own their termination sequence:
+sends SIGTERM to the Node process instead, and both services own their termination sequence.
 
-1. The readiness endpoint reports the instance as not ready while liveness stays healthy, so the
-   load balancer removes the pod from the Service.
-2. The process keeps serving in-flight requests for `SHUTDOWN_DRAIN_DELAY_MS`.
-3. The HTTP server stops accepting connections and waits for the running requests to finish.
-4. The background workers, Redis, and PostgreSQL connections are closed.
+The Gateway runs four bounded phases:
+
+1. **Drain** (`SHUTDOWN_DRAIN_DELAY_MS`, 10 seconds): readiness reports the instance as not ready
+   while liveness stays healthy, and every new request is answered with `503 SERVER_SHUTTING_DOWN`.
+   The health and metrics endpoints stay reachable for the kubelet and Prometheus. The requests that
+   are already running, including the SSE streams, may finish their work.
+2. **Background work**: the provider health monitor stops and the usage worker flushes the Redis
+   queue.
+3. **Server close**: the HTTP server stops accepting connections and waits for the running requests.
+   When they do not finish in time, the in-flight upstream requests are aborted. The provider
+   stream then fails with an abort error, the handler writes an SSE error event, and the response
+   ends. A stream is therefore never cut off silently by the forced process exit. If the requests
+   still do not end, the remaining sockets are destroyed.
+4. **Resources**: the Redis and PostgreSQL connections are closed.
 
 `SHUTDOWN_TIMEOUT_MS` is the total budget of that sequence and must stay below
 `terminationGracePeriodSeconds` of the workloads, otherwise Kubernetes sends SIGKILL while requests
 are still running. The current manifests use a 10 second drain window, a 30 second budget, and a 45
-second grace period.
+second grace period. Every phase is bounded on its own, so an unresponsive Redis or provider cannot
+block the shutdown longer than the budget.
+
+The exit code reports the result: `0` when the shutdown was clean, `1` when a request had to be
+aborted or a step failed. A `1` during a rollout therefore points at a request that did not finish
+in time and has to be investigated.
+
+The Dashboard uses the same sequence without the provider phase: it drains, answers new session
+requests with `503`, closes the HTTP server after the running requests, and exits.
+
+## Database migration
+
+The migration job runs the Prisma CLI from the Gateway image with a read only root filesystem. That
+layout was verified against the released runtime layout: the CLI and the schema engine only read the
+schema, the migration files, and the engine binaries. The single write attempt of the CLI is its
+engine version cache under `$HOME/.cache/prisma`; it fails harmlessly on a read only filesystem and
+does not stop the migration. The job is bound to `activeDeadlineSeconds`, so a database that accepts
+the connection but never answers cannot block a rollout forever.
 
 ## Required external configuration
 

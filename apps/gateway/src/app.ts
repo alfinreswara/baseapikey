@@ -59,6 +59,7 @@ import { chatRoutes } from './modules/chat/chat.routes';
 import { healthRoutes } from './modules/health/health.routes';
 import type { HealthService } from './modules/health/health.service';
 import { inferenceRoutes } from './modules/inference/inference.routes';
+import type { ServiceLifecycle } from './modules/lifecycle/service-lifecycle';
 import { metricsRoutes } from './modules/metrics/metrics.routes';
 import { MetricsService } from './modules/metrics/metrics.service';
 import type { IModelCatalogCache } from './modules/models/cache/model-catalog.cache';
@@ -80,6 +81,7 @@ import type { IOrganizationInvitationNotificationService } from './modules/organ
 import { OrganizationService } from './modules/organizations/services/organization.service';
 import { registerNineRouter } from './modules/providers/9router';
 import { syncDatabaseProviders } from './modules/providers/provider-loader';
+import { ResilientProviderRouter } from './modules/providers/resilience/resilient-provider-router';
 import { PrismaQuotaRepository } from './modules/quota/repositories/quota.repository';
 import { QuotaService } from './modules/quota/services/quota.service';
 import { registerUsageTrackingHook } from './modules/usage/middleware/usage.middleware';
@@ -131,6 +133,19 @@ export interface BuildAppOptions {
   metricsToken?: string;
   organizationInvitationNotificationService?: IOrganizationInvitationNotificationService;
   errorReporter?: IErrorReporter;
+  /** Shared lifecycle state, used to reject new requests while draining. */
+  lifecycle?: ServiceLifecycle;
+}
+
+/** Routes that stay reachable while the instance drains. */
+function isDrainExemptRoute(url: string): boolean {
+  const pathname = url.split('?')[0] ?? '';
+  return (
+    pathname === '/health' ||
+    pathname === '/health/live' ||
+    pathname === '/health/ready' ||
+    pathname === '/metrics'
+  );
 }
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -187,6 +202,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   const providerRegistry = options.providerRegistry ?? new ProviderRegistry();
+  // The router combines the signal of the individual request with the service
+  // wide abort signal, so a shutdown can end every in-flight upstream
+  // request, including the long running streams.
+  const resilientRouter = new ResilientProviderRouter(providerRegistry, {
+    abortSignal: options.lifecycle?.signal,
+  });
   const userRepository = options.userRepository ?? new PrismaUserRepository();
   const sessionRepository = options.sessionRepository ?? new PrismaSessionRepository();
   const apiKeyRepository = options.apiKeyRepository ?? new PrismaApiKeyRepository();
@@ -307,6 +328,23 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       url: request.url,
       requestId,
     });
+
+    // The instance drains before it closes: new work is rejected while the
+    // requests that are already running may finish.
+    if (options.lifecycle?.isDraining && !isDrainExemptRoute(request.url)) {
+      void reply
+        .status(503)
+        .header('Connection', 'close')
+        .send({
+          success: false,
+          error: {
+            code: 'SERVER_SHUTTING_DOWN',
+            message: 'The service is shutting down and does not accept new requests',
+          },
+        });
+      return;
+    }
+
     done();
   });
 
@@ -423,6 +461,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     apiKeyRepository,
     userRepository,
     providerRegistry,
+    resilientRouter,
     quotaService,
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
@@ -431,6 +470,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     apiKeyRepository,
     userRepository,
     providerRegistry,
+    resilientRouter,
     quotaService,
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),

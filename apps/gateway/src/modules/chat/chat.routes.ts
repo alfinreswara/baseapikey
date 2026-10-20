@@ -14,6 +14,7 @@ import {
   requireAvailableBilling,
 } from '../billing/middleware/billing-usage.middleware';
 import type { ModelCatalogService } from '../models/services/model-catalog.service';
+import type { ResilientProviderRouter } from '../providers/resilience/resilient-provider-router';
 import { requireQuota } from '../quota/middleware/quota.middleware';
 import type { QuotaService } from '../quota/services/quota.service';
 
@@ -25,6 +26,8 @@ export interface ChatRoutesOptions extends FastifyPluginOptions {
   userRepository?: IUserRepository;
   providerRegistry?: ProviderRegistry;
   chatCompletionService?: ChatCompletionService;
+  /** Router that also carries the service wide abort signal. */
+  resilientRouter?: ResilientProviderRouter;
   quotaService?: QuotaService;
   billingGuard?: IOrganizationBillingGuard;
   modelCatalogService?: ModelCatalogService;
@@ -48,7 +51,7 @@ export async function chatRoutes(
     new ChatCompletionService(
       options.providerRegistry!,
       '9router',
-      undefined,
+      options.resilientRouter,
       options.modelCatalogService,
     );
 

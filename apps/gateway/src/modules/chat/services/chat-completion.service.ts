@@ -30,7 +30,7 @@ export class ChatCompletionService {
     const providerReq = mapDTOToProviderRequest(dto);
     const providerRes = await this.resilientRouter.execute(
       targetProviderId,
-      (provider) => provider.chat(providerReq, options),
+      (provider, effectiveOptions) => provider.chat(providerReq, effectiveOptions),
       options,
       'supportsChat',
     );
@@ -68,7 +68,7 @@ export class ChatCompletionService {
     const providerReq = mapDTOToProviderRequest(dto);
     const stream = await this.resilientRouter.execute(
       targetProviderId,
-      (provider) => provider.streamChat(providerReq, options),
+      (provider, effectiveOptions) => provider.streamChat(providerReq, effectiveOptions),
       options,
       'supportsStreaming',
     );

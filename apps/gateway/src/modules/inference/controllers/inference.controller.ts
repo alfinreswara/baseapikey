@@ -16,7 +16,7 @@ export class InferenceController {
   async embedding(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dto = parseInferenceDto(EmbeddingSchema, request.body);
     request.usageMetadata = { provider: dto.provider ?? '9router', model: dto.model };
-    const result = await this.withAbort(request, (signal) =>
+    const result = await this.withAbort(reply, (signal) =>
       this.service.createEmbedding(dto, { signal }),
     );
     request.usageMetadata = {
@@ -33,7 +33,7 @@ export class InferenceController {
       provider: dto.provider ?? '9router',
       model: dto.model ?? 'default-image-model',
     };
-    const result = await this.withAbort(request, (signal) =>
+    const result = await this.withAbort(reply, (signal) =>
       this.service.createImage(dto, { signal }),
     );
     void reply.status(200).send(result);
@@ -42,7 +42,7 @@ export class InferenceController {
   async speech(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dto = parseInferenceDto(SpeechSchema, request.body);
     request.usageMetadata = { provider: dto.provider ?? '9router', model: dto.model };
-    const result = await this.withAbort(request, (signal) =>
+    const result = await this.withAbort(reply, (signal) =>
       this.service.createSpeech(dto, { signal }),
     );
     void reply
@@ -59,7 +59,7 @@ export class InferenceController {
     const multipart = parseAudioMultipart(request.body, contentType);
     const fields = parseInferenceDto(TranscriptionFieldsSchema, multipart.fields);
     request.usageMetadata = { provider: fields.provider ?? '9router', model: fields.model };
-    const result = await this.withAbort(request, (signal) =>
+    const result = await this.withAbort(reply, (signal) =>
       this.service.transcribeAudio(fields, multipart.file, { signal }),
     );
     if (typeof result === 'string') {
@@ -70,16 +70,23 @@ export class InferenceController {
   }
 
   private async withAbort<T>(
-    request: FastifyRequest,
+    reply: FastifyReply,
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     const controller = new AbortController();
-    const onClose = () => controller.abort();
-    request.raw.on('close', onClose);
+    // The request stream ends as soon as the body was consumed, which is not
+    // a client disconnect. The response reports the real disconnect: it is
+    // closed without being ended.
+    const onClose = () => {
+      if (!reply.raw.writableEnded) {
+        controller.abort();
+      }
+    };
+    reply.raw.on('close', onClose);
     try {
       return await operation(controller.signal);
     } finally {
-      request.raw.removeListener('close', onClose);
+      reply.raw.removeListener('close', onClose);
     }
   }
 }

@@ -19,6 +19,12 @@ export interface ProviderResilienceOptions {
   cooldownMs?: number | undefined;
   now?: (() => number) | undefined;
   sleep?: ((milliseconds: number) => Promise<void>) | undefined;
+  /**
+   * Service wide abort signal. It is combined with the signal of the
+   * individual request, so a shutdown can end every in-flight upstream
+   * request, including the long running streams.
+   */
+  abortSignal?: AbortSignal | undefined;
 }
 
 export class ResilientProviderRouter {
@@ -30,6 +36,7 @@ export class ResilientProviderRouter {
   private readonly cooldownMs: number;
   private readonly now: () => number;
   private readonly sleep: (milliseconds: number) => Promise<void>;
+  private readonly abortSignal: AbortSignal | undefined;
 
   constructor(
     private readonly registry: ProviderRegistry,
@@ -42,15 +49,17 @@ export class ResilientProviderRouter {
     this.cooldownMs = options.cooldownMs ?? 30_000;
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.abortSignal = options.abortSignal;
   }
 
   async execute<T>(
     preferredProviderId: string,
-    operation: (provider: IProviderAdapter) => Promise<T>,
+    operation: (provider: IProviderAdapter, options?: ProviderRequestOptions) => Promise<T>,
     options?: ProviderRequestOptions,
     requiredCapability?: keyof ProviderCapabilities,
   ): Promise<T> {
     const providers = this.orderedProviders(preferredProviderId, requiredCapability);
+    const effectiveOptions = this.effectiveOptions(options);
     let lastError: unknown;
 
     if (providers.length === 0) {
@@ -68,11 +77,11 @@ export class ResilientProviderRouter {
       if (this.isCircuitOpen(provider.getName())) continue;
       const maxRetries = this.providerMaxRetries(provider.getName());
       for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-        if (options?.signal?.aborted) {
+        if (effectiveOptions?.signal?.aborted) {
           throw ProviderError.fromHttpStatus(408, 'Request aborted by client', provider.getName());
         }
         try {
-          const result = await operation(provider);
+          const result = await operation(provider, effectiveOptions);
           this.recordSuccess(provider.getName());
           return result;
         } catch (error) {
@@ -103,6 +112,29 @@ export class ResilientProviderRouter {
     if (state.openUntil > this.now()) return true;
     if (state.openUntil !== 0) this.circuits.delete(providerId);
     return false;
+  }
+
+  /**
+   * Combines the signal of the individual request with the service wide abort
+   * signal. The provider then stops as soon as the client disconnects or the
+   * instance starts to terminate.
+   */
+  private effectiveOptions(options?: ProviderRequestOptions): ProviderRequestOptions | undefined {
+    const requestSignal = options?.signal;
+    const serviceSignal = this.abortSignal;
+    if (!requestSignal && !serviceSignal) {
+      return options;
+    }
+    if (requestSignal && !serviceSignal) {
+      return { ...options, signal: requestSignal };
+    }
+    if (!requestSignal && serviceSignal) {
+      return { ...options, signal: serviceSignal };
+    }
+    return {
+      ...options,
+      signal: AbortSignal.any([requestSignal!, serviceSignal!]),
+    };
   }
 
   private orderedProviders(

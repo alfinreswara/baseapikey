@@ -44,6 +44,16 @@ async function run(): Promise<void> {
   assert.equal(stillLive.status, 200);
   console.log('✅ Dashboard readiness fails during shutdown while liveness stays healthy');
 
+  const rejected = await fetch(`${dashboardUrl}/api/session/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'user@example.com', password: 'Password123!' }),
+  });
+  assert.equal(rejected.status, 503);
+  const rejectedBody = (await rejected.json()) as { error?: { code?: string } };
+  assert.equal(rejectedBody.error?.code, 'SERVER_SHUTTING_DOWN');
+  console.log('✅ Dashboard rejects new session requests while the instance drains');
+
   const slowServer = createServer((_request, response) => {
     setTimeout(() => {
       response.writeHead(200, { 'Content-Type': 'text/plain' });

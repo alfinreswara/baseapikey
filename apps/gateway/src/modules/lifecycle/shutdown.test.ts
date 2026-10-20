@@ -85,8 +85,46 @@ async function runShutdownTests(): Promise<void> {
   const failingResult = await failingCoordinator.shutdown('SIGTERM');
   assert.equal(failingResult.status, 'failed');
   assert.ok(failingResult.error instanceof Error);
-  assert.deepEqual(failingHooks.calls, ['markNotReady', 'stopBackgroundWork', 'closeServer']);
+  // A failing step does not stop the sequence: the resources are still closed.
+  assert.deepEqual(failingHooks.calls, [
+    'markNotReady',
+    'stopBackgroundWork',
+    'closeServer',
+    'closeResources',
+  ]);
   console.log('  ✅ A failing shutdown step is reported instead of silently succeeding');
+
+  let aborted = false;
+  let forcedClose = false;
+  let forcedExit = false;
+  const stuckHooks = createRecordingHooks();
+  stuckHooks.closeServer = () => new Promise<void>(() => undefined);
+  const stuckCoordinator = new ShutdownCoordinator({
+    hooks: {
+      ...stuckHooks,
+      abortInFlightRequests: () => {
+        aborted = true;
+      },
+      forceCloseServer: () => {
+        forcedClose = true;
+      },
+    },
+    drainDelayMs: 0,
+    timeoutMs: 2_000,
+    forceGraceMs: 100,
+    resourceReserveMs: 500,
+    logger: silentLogger,
+    sleep: async () => undefined,
+    onTimeout: () => {
+      forcedExit = true;
+    },
+  });
+  const stuckResult = await stuckCoordinator.shutdown('SIGTERM');
+  assert.equal(stuckResult.status, 'forced');
+  assert.equal(aborted, true, 'The in-flight requests must be aborted');
+  assert.equal(forcedClose, true, 'The remaining sockets must be destroyed');
+  assert.equal(forcedExit, false, 'The shutdown must finish before the forced exit');
+  console.log('  ✅ A server that does not close is aborted and then forced to close');
 
   let timeoutTriggered = false;
   const timeoutCoordinator = new ShutdownCoordinator({

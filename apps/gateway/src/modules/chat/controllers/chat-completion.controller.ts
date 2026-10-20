@@ -14,10 +14,16 @@ export function createChatCompletionController(chatService: ChatCompletionServic
     };
 
     const abortController = new AbortController();
+    // The request stream ends as soon as the body was consumed, which happens
+    // long before the response is written. Listening on the request would
+    // therefore abort every provider call immediately. The response reports
+    // the real client disconnect: it is closed without being ended.
     const handleClose = () => {
-      abortController.abort();
+      if (!reply.raw.writableEnded) {
+        abortController.abort();
+      }
     };
-    request.raw.on('close', handleClose);
+    reply.raw.on('close', handleClose);
 
     const options = { signal: abortController.signal };
 
@@ -34,7 +40,7 @@ export function createChatCompletionController(chatService: ChatCompletionServic
         }
         void reply.status(200).send(responseDTO);
       } finally {
-        request.raw.removeListener('close', handleClose);
+        reply.raw.removeListener('close', handleClose);
       }
       return;
     }
@@ -44,7 +50,7 @@ export function createChatCompletionController(chatService: ChatCompletionServic
     try {
       stream = await chatService.getCompletionStream(dto, options);
     } catch (err) {
-      request.raw.removeListener('close', handleClose);
+      reply.raw.removeListener('close', handleClose);
       throw err;
     }
 
@@ -59,7 +65,9 @@ export function createChatCompletionController(chatService: ChatCompletionServic
       reply.raw.writeHead(200);
 
       for await (const chunk of stream) {
-        if (request.raw.destroyed || abortController.signal.aborted) {
+        // The request stream is destroyed as soon as the body was consumed,
+        // so only the response tells whether the client is still connected.
+        if (reply.raw.destroyed || abortController.signal.aborted) {
           break;
         }
 
@@ -78,7 +86,7 @@ export function createChatCompletionController(chatService: ChatCompletionServic
         }
       }
 
-      if (!request.raw.destroyed && !abortController.signal.aborted) {
+      if (!reply.raw.destroyed && !abortController.signal.aborted) {
         reply.raw.write('data: [DONE]\n\n');
       }
     } catch (err: unknown) {
@@ -91,7 +99,7 @@ export function createChatCompletionController(chatService: ChatCompletionServic
       });
       reply.raw.write(`data: ${errPayload}\n\n`);
     } finally {
-      request.raw.removeListener('close', handleClose);
+      reply.raw.removeListener('close', handleClose);
       if (!reply.raw.destroyed) {
         reply.raw.end();
       }

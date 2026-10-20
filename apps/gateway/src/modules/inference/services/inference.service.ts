@@ -39,9 +39,9 @@ export class InferenceService {
     const providerId = await this.resolveProvider(dto.model, provider);
     return this.router.execute(
       providerId,
-      (provider) => {
+      (provider, effectiveOptions) => {
         if (!provider.createEmbedding) throw this.unsupported(provider.getName(), 'embeddings');
-        return provider.createEmbedding(request, options);
+        return provider.createEmbedding(request, effectiveOptions);
       },
       options,
       'supportsEmbeddings',
@@ -56,9 +56,9 @@ export class InferenceService {
     const providerId = await this.resolveProvider(dto.model, provider);
     return this.router.execute(
       providerId,
-      (provider) => {
+      (provider, effectiveOptions) => {
         if (!provider.createImage) throw this.unsupported(provider.getName(), 'images');
-        return provider.createImage(request, options);
+        return provider.createImage(request, effectiveOptions);
       },
       options,
       'supportsImages',
@@ -73,9 +73,9 @@ export class InferenceService {
     const providerId = await this.resolveProvider(dto.model, provider);
     return this.router.execute(
       providerId,
-      (provider) => {
+      (provider, effectiveOptions) => {
         if (!provider.createSpeech) throw this.unsupported(provider.getName(), 'audio speech');
-        return provider.createSpeech(request, options);
+        return provider.createSpeech(request, effectiveOptions);
       },
       options,
       'supportsAudio',
@@ -91,7 +91,7 @@ export class InferenceService {
     const providerId = await this.resolveProvider(fields.model, provider);
     return this.router.execute(
       providerId,
-      (provider) => {
+      (provider, effectiveOptions) => {
         if (!provider.transcribeAudio) {
           throw this.unsupported(provider.getName(), 'audio transcription');
         }
@@ -102,7 +102,7 @@ export class InferenceService {
             filename: file.filename,
             contentType: file.contentType,
           },
-          options,
+          effectiveOptions,
         );
       },
       options,

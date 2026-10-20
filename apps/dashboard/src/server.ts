@@ -390,6 +390,18 @@ export function createDashboardServer(serverOptions: DashboardServerOptions = {}
       secureHeaders(response, options.gatewayUrl, options.production);
       const requestUrl = new URL(request.url ?? '/', options.publicUrl);
       if (requestUrl.pathname.startsWith('/api/session/')) {
+        // The instance drains before it closes: new work is rejected while the
+        // requests that are already running may finish.
+        if (options.state.shuttingDown) {
+          sendJson(response, 503, {
+            success: false,
+            error: {
+              code: 'SERVER_SHUTTING_DOWN',
+              message: 'The service is shutting down and does not accept new requests',
+            },
+          });
+          return;
+        }
         await handleSessionRequest(request, response, requestUrl.pathname, options);
         return;
       }

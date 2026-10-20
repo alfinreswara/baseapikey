@@ -6,6 +6,10 @@ metadata:
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400
+  # The Prisma schema engine waits for the database. A database that accepts
+  # the connection but never answers would block the rollout forever, so the
+  # job is bound to a deadline.
+  activeDeadlineSeconds: 600
   template:
     spec:
       restartPolicy: Never
@@ -26,6 +30,13 @@ spec:
             # The runtime image is distroless: it ships the Node binary at
             # /nodejs/bin/node and does not add that directory to PATH, so the
             # executable has to be addressed by its absolute path.
+            #
+            # The job runs with a read only root filesystem. The Prisma CLI
+            # and the schema engine were verified against that layout: they
+            # only read the schema, the migrations, and the engine binaries.
+            # The single write attempt of the CLI is its engine version cache
+            # under $HOME/.cache/prisma. It fails harmlessly on a read only
+            # filesystem and does not stop the migration.
             - /nodejs/bin/node
             - node_modules/prisma/build/index.js
             - migrate

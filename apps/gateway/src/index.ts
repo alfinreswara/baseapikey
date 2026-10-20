@@ -11,6 +11,7 @@ import { PrismaApiKeyRepository } from './modules/api-keys/repositories/api-key.
 import { RedisLoginRateLimiter } from './modules/auth/utils/redis-login-rate-limiter';
 import { PrismaOrganizationBillingGuard } from './modules/billing/middleware/billing-usage.middleware';
 import { HealthService } from './modules/health/health.service';
+import { ServiceLifecycle } from './modules/lifecycle/service-lifecycle';
 import { ShutdownCoordinator, scheduleProcessExit } from './modules/lifecycle/shutdown';
 import { RedisModelCatalogCache } from './modules/models/cache/model-catalog.cache';
 import { WebhookErrorReporter } from './modules/observability/error-reporter';
@@ -42,15 +43,17 @@ async function start(): Promise<void> {
   let healthService: HealthService | undefined;
   let providerHealthMonitor: ProviderHealthMonitor | undefined;
   let usageWorker: RedisUsageWorker | undefined;
+  const lifecycle = new ServiceLifecycle();
 
   // Kubernetes sends SIGTERM to PID 1 because the distroless runtime image
   // cannot run a shell based preStop hook. The coordinator owns the whole
-  // termination sequence: it stops advertising readiness, drains traffic,
-  // stops the background workers, closes the HTTP server, and only then
-  // releases the Redis and PostgreSQL connections.
+  // termination sequence: it stops advertising readiness, rejects new
+  // requests, drains traffic, stops the background workers, closes the HTTP
+  // server, and only then releases the Redis and PostgreSQL connections.
   const shutdownCoordinator = new ShutdownCoordinator({
     hooks: {
       markNotReady: () => {
+        lifecycle.beginDrain();
         healthService?.markShuttingDown();
       },
       stopBackgroundWork: async () => {
@@ -73,6 +76,12 @@ async function start(): Promise<void> {
         if (failedResult) {
           throw failedResult.reason;
         }
+      },
+      abortInFlightRequests: () => {
+        lifecycle.abortInFlight('Gateway is shutting down');
+      },
+      forceCloseServer: () => {
+        app?.server.closeAllConnections();
       },
     },
     drainDelayMs: env.SHUTDOWN_DRAIN_DELAY_MS,
@@ -210,6 +219,7 @@ async function start(): Promise<void> {
       organizationContextResolver: new PrismaOrganizationContextResolver(),
       usageCostResolver: new PrismaUsageCostResolver(),
       billingUsageGuard: new PrismaOrganizationBillingGuard(),
+      lifecycle,
       ...(env.METRICS_TOKEN ? { metricsToken: env.METRICS_TOKEN } : {}),
       ...(env.PROVIDER_ENCRYPTION_KEY
         ? { providerEncryptionKey: env.PROVIDER_ENCRYPTION_KEY }
