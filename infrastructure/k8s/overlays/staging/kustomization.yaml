@@ -1,0 +1,85 @@
+# BaseAPIKey staging overlay.
+#
+# The staging environment is separated from production by its own namespace,
+# its own configuration, and its own release artifact. Nothing in this file
+# points at a production resource.
+#
+# Values that only the project owner can provide are marked as required. They
+# are not invented here, and the release validation refuses a rendered
+# manifest that still contains them:
+#
+#   REPLACE_WITH_STAGING_API_HOST        host of the staging Gateway
+#   REPLACE_WITH_STAGING_DASHBOARD_HOST  host of the staging Dashboard
+#   baseapikey-staging-secrets           Secret created from a secret manager
+#   baseapikey-staging-tls               TLS certificate for the staging hosts
+#
+# The images are pinned to the commit derived tag that the release workflow
+# publishes for the tested commit (`sha-<commit>`). The image has to be
+# published before the overlay can be applied.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The staging workloads live in their own namespace and never share a
+# resource with production.
+namespace: baseapikey-staging
+
+resources:
+  - ../../base
+
+patches:
+  # The namespace object of the base carries the production name.
+  - target:
+      kind: Namespace
+      name: baseapikey
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: baseapikey-staging
+
+  # The staging environment is not production: the strict production rules for
+  # the secret values do not apply, and the environment is visible in the
+  # logs and in the metrics.
+  - target:
+      kind: ConfigMap
+      name: baseapikey-config
+    patch: |-
+      - op: replace
+        path: /data/NODE_ENV
+        value: staging
+
+  # The example hosts of the base are replaced. The values are required from
+  # the project owner and are validated before a staging rollout.
+  - target:
+      kind: Ingress
+      name: baseapikey
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: REPLACE_WITH_STAGING_API_HOST
+      - op: replace
+        path: /spec/tls/0/hosts/1
+        value: REPLACE_WITH_STAGING_DASHBOARD_HOST
+      - op: replace
+        path: /spec/tls/0/secretName
+        value: baseapikey-staging-tls
+      - op: replace
+        path: /spec/rules/0/host
+        value: REPLACE_WITH_STAGING_API_HOST
+      - op: replace
+        path: /spec/rules/1/host
+        value: REPLACE_WITH_STAGING_DASHBOARD_HOST
+
+# The release version is declared once and travels with every rendered
+# resource, so the deployed artifacts can always be traced back to a commit.
+labels:
+  - pairs:
+      app.kubernetes.io/version: sha-b8b65ae
+      app.kubernetes.io/environment: staging
+
+images:
+  - name: ghcr.io/alfinreswara/baseapikey-gateway
+    newName: ghcr.io/alfinreswara/baseapikey-gateway
+    newTag: sha-b8b65ae
+  - name: ghcr.io/alfinreswara/baseapikey-dashboard
+    newName: ghcr.io/alfinreswara/baseapikey-dashboard
+    newTag: sha-b8b65ae

@@ -42,9 +42,12 @@ export class RedisUsageWorker {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.processBatch(), this.intervalMs);
+    this.timer = setInterval(
+      () => void this.processBatch().catch(() => undefined),
+      this.intervalMs,
+    );
     this.timer.unref();
-    void this.processBatch();
+    void this.processBatch().catch(() => undefined);
   }
 
   async stop(): Promise<void> {
@@ -78,6 +81,11 @@ export class RedisUsageWorker {
           );
         }
       }
+    } catch {
+      // A cache outage must not reject the batch. The events stay in the
+      // queue and are processed when the cache is available again. An
+      // unhandled rejection here would terminate the whole process.
+      return 0;
     } finally {
       this.processing = false;
     }

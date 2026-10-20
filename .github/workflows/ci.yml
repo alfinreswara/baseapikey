@@ -312,7 +312,7 @@ jobs:
       - name: Validate the release configuration
         run: node scripts/validate-k8s-release.mjs
 
-      - name: Render the production overlay
+      - name: Render the overlays
         run: |
           if ! command -v kubectl >/dev/null 2>&1; then
             echo "kubectl is required to render the Kubernetes overlays" >&2
@@ -321,9 +321,14 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/manifests"
           kubectl kustomize infrastructure/k8s/overlays/production \
             > "${RUNNER_TEMP}/manifests/baseapikey-production.yaml"
+          kubectl kustomize infrastructure/k8s/overlays/staging \
+            > "${RUNNER_TEMP}/manifests/baseapikey-staging.yaml"
 
-      - name: Validate the rendered manifests
+      - name: Validate the rendered production manifests
         run: node scripts/validate-k8s-release.mjs --rendered "${RUNNER_TEMP}/manifests/baseapikey-production.yaml"
+
+      - name: Validate the rendered staging manifests
+        run: node scripts/validate-k8s-release.mjs --rendered "${RUNNER_TEMP}/manifests/baseapikey-staging.yaml" --allow-placeholders
 
   secret-scan:
     name: Repository Secret Scan

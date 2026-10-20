@@ -1,0 +1,26 @@
+# BaseAPIKey staging monitoring overlay.
+#
+# The Prometheus resources of the base watch the production namespace. The
+# staging overlay keeps the same rules but points them at the staging
+# namespace, so a staging incident raises the same alerts.
+#
+#   kubectl apply -k infrastructure/k8s/overlays/monitoring-staging
+#
+# The Prometheus instance has to be configured to discover the ServiceMonitor
+# in the staging namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: baseapikey-staging
+
+resources:
+  - ../../base/monitoring.yaml
+
+patches:
+  - target:
+      kind: PrometheusRule
+      name: baseapikey-alerts
+    patch: |-
+      - op: replace
+        path: /spec/groups/0/rules/1/expr
+        value: kube_deployment_status_replicas_available{namespace="baseapikey-staging",deployment="gateway"} < 1

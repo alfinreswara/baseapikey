@@ -66,6 +66,41 @@ async function run(): Promise<void> {
   await worker.processBatch();
   assert.deepEqual(processed, ['first', 'second']);
   assert.equal(queue.lists.get('baseapikey:usage:queue')?.length, 0);
+
+  // A cache outage must not reject the batch. The events stay in the queue
+  // and are processed when the cache is available again. An unhandled
+  // rejection would terminate the whole process.
+  const brokenQueue: RedisUsageQueueClient = {
+    async lPush(): Promise<number> {
+      throw new Error('The client is closed');
+    },
+    async rPop(): Promise<string[] | null> {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:6379');
+    },
+  };
+  const brokenWorker = new RedisUsageWorker(brokenQueue, tracker as never, 10, 60_000);
+  const unhandled: unknown[] = [];
+  const unhandledListener = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', unhandledListener);
+  try {
+    brokenWorker.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await assert.doesNotReject(
+      () => brokenWorker.stop(),
+      'The shutdown of the worker must not fail when the cache is unavailable',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    process.off('unhandledRejection', unhandledListener);
+  }
+  assert.equal(
+    unhandled.length,
+    0,
+    `A cache outage must not produce an unhandled rejection: ${String(unhandled[0])}`,
+  );
+
   console.log('✅ Production usage cost and durable queue tests passed');
 }
 

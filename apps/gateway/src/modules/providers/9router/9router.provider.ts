@@ -187,7 +187,10 @@ export class NineRouterProvider implements IProviderAdapter {
       try {
         while (true) {
           if (options?.signal?.aborted) {
-            void reader.cancel();
+            // The cancel promise rejects with the abort reason when the
+            // stream was aborted. It has to be handled, an unhandled
+            // rejection would terminate the process.
+            void reader.cancel().catch(() => undefined);
             break;
           }
 
@@ -223,7 +226,7 @@ export class NineRouterProvider implements IProviderAdapter {
         throw mapNineRouterError(err, undefined, providerSlug);
       } finally {
         cleanup();
-        void reader.cancel();
+        void reader.cancel().catch(() => undefined);
       }
     })();
   }

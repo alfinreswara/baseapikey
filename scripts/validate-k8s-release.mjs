@@ -14,15 +14,22 @@
  *   3. A termination grace period that is shorter than the shutdown budget
  *      of the application, which makes Kubernetes send SIGKILL while
  *      requests are still running.
+ *   4. An environment that is not separated from production, or that still
+ *      carries the example hosts of the base.
  *
  * Usage:
  *   node scripts/validate-k8s-release.mjs
  *   node scripts/validate-k8s-release.mjs --rendered <rendered-manifest.yaml>
+ *   node scripts/validate-k8s-release.mjs --rendered <file> --allow-placeholders
  *
  * The `--rendered` mode validates the output of `kubectl kustomize`, which is
  * the authoritative renderer. The default mode validates the checked-in base
- * manifests and applies the `images:` and `labels:` transformers of the
- * production overlay the same way kustomize does.
+ * manifests and applies the `images:` and `labels:` transformers of every
+ * overlay the same way kustomize does.
+ *
+ * `--allow-placeholders` is used for the checked-in overlays, which still
+ * contain the values that the project owner has to provide. A manifest that
+ * is rendered for an actual rollout must not contain them.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -31,14 +38,18 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const k8sRoot = join(repositoryRoot, 'infrastructure', 'k8s');
 const baseRoot = join(k8sRoot, 'base');
-const overlayRoot = join(k8sRoot, 'overlays', 'production');
+const overlaysRoot = join(k8sRoot, 'overlays');
 
 const EXPECTED_REGISTRY = 'ghcr.io';
 const EXPECTED_IMAGES = new Set(['baseapikey-gateway', 'baseapikey-dashboard']);
+/** Namespace of the production environment. */
+const PRODUCTION_NAMESPACE = 'baseapikey';
 const PLACEHOLDER_TAG = 'RELEASE_TAG_PLACEHOLDER';
 const FORBIDDEN_TAG = 'latest';
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const VERSION_LABEL = 'app.kubernetes.io/version';
+const PLACEHOLDER_PATTERN = /REPLACE_WITH_[A-Z0-9_]+|RELEASE_TAG_PLACEHOLDER/;
+const EXAMPLE_HOST_PATTERN = /(^|\.)example\.com$/;
 /** Executables the distroless runtime image really provides. */
 const DISTROLESS_EXECUTABLES = new Set(['/nodejs/bin/node']);
 const DISTROLESS_REPOSITORY = 'gcr.io/distroless/nodejs';
@@ -82,6 +93,22 @@ function metadataName(document) {
     }
     if (!insideMetadata) continue;
     const match = line.match(/^\s{2}name:\s*(\S+)/);
+    if (match) return match[1];
+    if (/^\S/.test(line)) break;
+  }
+  return undefined;
+}
+
+function metadataNamespace(document) {
+  const lines = document.split('\n');
+  let insideMetadata = false;
+  for (const line of lines) {
+    if (/^metadata:\s*$/.test(line)) {
+      insideMetadata = true;
+      continue;
+    }
+    if (!insideMetadata) continue;
+    const match = line.match(/^\s{2}namespace:\s*(\S+)/);
     if (match) return match[1];
     if (/^\S/.test(line)) break;
   }
@@ -177,10 +204,8 @@ function repositoryPath(reference) {
 }
 
 function isBaseApiKeyImage(reference) {
-  return (
-    EXPECTED_IMAGES.has(repositoryPath(reference)) ||
-    repositoryPath(reference).includes('baseapikey')
-  );
+  const path = repositoryPath(reference);
+  return EXPECTED_IMAGES.has(path) || path.includes('baseapikey');
 }
 
 /**
@@ -219,14 +244,15 @@ function isDistrolessImage(reference, runtimeBaseImages) {
   return baseImage.includes(DISTROLESS_REPOSITORY);
 }
 
-/** Reads the `images:` and `labels:` sections of the production overlay. */
-function readOverlayConfig() {
-  const overlayFile = join(overlayRoot, 'kustomization.yaml');
+/** Reads the `images:`, `labels:`, `namespace:` and `patches:` of an overlay. */
+function readOverlayConfig(overlayDirectory) {
+  const overlayFile = join(overlayDirectory, 'kustomization.yaml');
   if (!existsSync(overlayFile)) {
     fail(`Missing overlay definition: ${overlayFile}`);
-    return { images: [], releaseVersion: undefined };
+    return { name: overlayDirectory, images: [], releaseVersion: undefined };
   }
-  const lines = readFileSync(overlayFile, 'utf8').split('\n');
+  const content = readFileSync(overlayFile, 'utf8');
+  const lines = content.split('\n');
 
   const blockOf = (key) => {
     const start = lines.findIndex((line) => new RegExp(`^${key}:\\s*$`).test(line));
@@ -253,23 +279,48 @@ function readOverlayConfig() {
     });
     match = entryPattern.exec(imageBlock);
   }
-  if (images.length === 0) {
-    fail('The production overlay does not pin any image');
-  }
-
   const labelBlock = blockOf('labels').join('\n');
   const releaseVersion = labelBlock
     .match(new RegExp(`${VERSION_LABEL.replace(/[.\/]/g, '\\$&')}:\\s*['"]?([^'"\n]+)['"]?`))?.[1]
     ?.trim();
 
-  if (!releaseVersion) {
-    fail(
-      `The production overlay must declare the release version once as the ` +
-        `"${VERSION_LABEL}" label`,
-    );
+  const namespace = content.match(/^namespace:\s*['"]?([^'"\n]+)['"]?\s*$/m)?.[1]?.trim();
+  const patchStart = content.search(/^patches:\s*$/m);
+  const patchBlock = patchStart === -1 ? '' : content.slice(patchStart);
+  // An overlay that includes the whole base deploys the application and
+  // therefore has to pin the released images.
+  const isApplicationOverlay = blockOf('resources').some((line) => line.trim() === '../../base');
+
+  if (isApplicationOverlay) {
+    if (images.length === 0) {
+      fail(`The overlay ${overlayDirectory} does not pin any image`);
+    }
+    if (!releaseVersion) {
+      fail(
+        `The overlay ${overlayDirectory} must declare the release version once as the ` +
+          `"${VERSION_LABEL}" label`,
+      );
+    }
   }
 
-  return { images, releaseVersion };
+  return {
+    name: overlayDirectory.split('/').pop(),
+    directory: overlayDirectory,
+    images,
+    releaseVersion,
+    namespace,
+    patchBlock,
+    isApplicationOverlay,
+  };
+}
+
+/** Every overlay that pins the application images. */
+function discoverOverlays() {
+  if (!existsSync(overlaysRoot)) return [];
+  return readdirSync(overlaysRoot)
+    .map((entry) => join(overlaysRoot, entry))
+    .filter((entry) => existsSync(join(entry, 'kustomization.yaml')))
+    .map((entry) => readOverlayConfig(entry));
 }
 
 /**
@@ -284,7 +335,7 @@ function pinningMode(reference) {
   return 'unpinned';
 }
 
-/** Applies the `images:` transformer of the production overlay. */
+/** Applies the `images:` transformer of an overlay. */
 function applyOverlay(reference, overlayImages) {
   const parsed = parseImageReference(reference);
   const entry = overlayImages.find((candidate) => candidate.name === parsed.name);
@@ -414,6 +465,41 @@ function validatePinningModes(modes, context) {
   }
 }
 
+/**
+ * An environment that is not production must not keep the example hosts and
+ * must not reuse the production namespace.
+ */
+function validateOverlaySeparation(overlay) {
+  // An overlay without an explicit namespace inherits the namespace of the
+  // base, which is the production namespace.
+  const namespace = overlay.namespace ?? PRODUCTION_NAMESPACE;
+  if (namespace === PRODUCTION_NAMESPACE) {
+    note(
+      `overlay ${overlay.name}: uses the production namespace ${PRODUCTION_NAMESPACE}; ` +
+        'the example hosts of the base are still part of its configuration',
+    );
+    return;
+  }
+  const patchesHosts =
+    overlay.patchBlock.includes('/spec/rules/0/host') &&
+    overlay.patchBlock.includes('/spec/rules/1/host');
+  if (overlay.isApplicationOverlay && !patchesHosts) {
+    fail(
+      `The overlay ${overlay.name} must replace the example hosts of the base Ingress ` +
+        'with the hosts of its own environment',
+    );
+  }
+  if (overlay.patchBlock.includes(`${PRODUCTION_NAMESPACE}-tls`)) {
+    fail(
+      `The overlay ${overlay.name} must not reuse the production TLS secret ` +
+        `"${PRODUCTION_NAMESPACE}-tls"`,
+    );
+  }
+  if (!overlay.namespace) {
+    fail(`The overlay ${overlay.name} does not declare its own namespace`);
+  }
+}
+
 function validateSource() {
   const baseFiles = listYamlFiles(baseRoot);
   const documents = [];
@@ -424,48 +510,62 @@ function validateSource() {
     }
   }
 
-  const overlay = readOverlayConfig();
+  const overlays = discoverOverlays();
   const runtimeBaseImages = readRuntimeBaseImages();
-  const modes = [];
 
-  for (const { file, document } of documents) {
-    const kind = documentKind(document) ?? 'Manifest';
-    const name = metadataName(document) ?? 'unknown';
-    const context = `${kind} ${name} (${file.replace(`${repositoryRoot}/`, '')})`;
-    const images = documentImages(document);
-    const effective = images.map((image) => applyOverlay(image.value, overlay.images));
-    for (const [index, image] of images.entries()) {
-      const mode = validateImageReference(
-        effective[index],
-        `${context} image line ${image.line}`,
-        overlay.releaseVersion,
-      );
-      if (mode) modes.push(mode);
+  for (const overlay of overlays) {
+    if (!overlay.isApplicationOverlay) {
+      validateOverlaySeparation(overlay);
+      continue;
     }
-    validateDistrolessCommands(document, context, effective, runtimeBaseImages);
-  }
+    const modes = [];
+    for (const { file, document } of documents) {
+      const kind = documentKind(document) ?? 'Manifest';
+      const name = metadataName(document) ?? 'unknown';
+      const context = `overlay ${overlay.name}: ${kind} ${name} (${file.replace(
+        `${repositoryRoot}/`,
+        '',
+      )})`;
+      const images = documentImages(document);
+      const effective = images.map((image) => applyOverlay(image.value, overlay.images));
+      for (const [index, image] of images.entries()) {
+        const mode = validateImageReference(
+          effective[index],
+          `${context} image line ${image.line}`,
+          overlay.releaseVersion,
+        );
+        if (mode) modes.push(mode);
+      }
+      validateDistrolessCommands(document, context, effective, runtimeBaseImages);
+    }
 
-  validatePinningModes(modes, 'The checked-in manifests');
+    validatePinningModes(modes, `The overlay ${overlay.name}`);
+    validateOverlaySeparation(overlay);
 
-  const gatewayDocument = documents.find(
-    ({ document }) =>
-      documentKind(document) === 'Deployment' && metadataName(document) === 'gateway',
-  );
-  const migrateDocument = documents.find(({ document }) => documentKind(document) === 'Job');
-  if (gatewayDocument && migrateDocument) {
-    const gatewayImage = applyOverlay(
-      documentImages(gatewayDocument.document).at(0)?.value ?? '',
-      overlay.images,
+    const gatewayDocument = documents.find(
+      ({ document }) =>
+        documentKind(document) === 'Deployment' && metadataName(document) === 'gateway',
     );
-    const migrateImage = applyOverlay(
-      documentImages(migrateDocument.document).at(0)?.value ?? '',
-      overlay.images,
-    );
-    if (gatewayImage !== migrateImage) {
-      fail(
-        `The migration job must run the same image as the Gateway ` +
-          `("${migrateImage}" != "${gatewayImage}")`,
+    const migrateDocument = documents.find(({ document }) => documentKind(document) === 'Job');
+    if (gatewayDocument && migrateDocument) {
+      const gatewayImage = applyOverlay(
+        documentImages(gatewayDocument.document).at(0)?.value ?? '',
+        overlay.images,
       );
+      const migrateImage = applyOverlay(
+        documentImages(migrateDocument.document).at(0)?.value ?? '',
+        overlay.images,
+      );
+      if (gatewayImage !== migrateImage) {
+        fail(
+          `The migration job of the overlay ${overlay.name} must run the same image as the ` +
+            `Gateway ("${migrateImage}" != "${gatewayImage}")`,
+        );
+      }
+    }
+
+    if (overlay.releaseVersion) {
+      note(`overlay ${overlay.name}: release version ${overlay.releaseVersion}`);
     }
   }
 
@@ -473,13 +573,9 @@ function validateSource() {
     documents.map((entry) => entry.document),
     readConfigValues(documents.map((entry) => entry.document)),
   );
-
-  if (overlay.releaseVersion) {
-    note(`release version: ${overlay.releaseVersion}`);
-  }
 }
 
-function validateRendered(file) {
+function validateRendered(file, allowPlaceholders) {
   const content = readFileSync(file, 'utf8');
   const documents = splitDocuments(content);
   const runtimeBaseImages = readRuntimeBaseImages();
@@ -487,7 +583,8 @@ function validateRendered(file) {
   for (const document of documents) {
     const kind = documentKind(document) ?? 'Manifest';
     const name = metadataName(document) ?? 'unknown';
-    const context = `${kind} ${name}`;
+    const namespace = metadataNamespace(document) ?? 'default';
+    const context = `${kind} ${name} (namespace ${namespace})`;
     const releaseVersion = metadataLabel(document, VERSION_LABEL);
     const images = documentImages(document);
     for (const image of images) {
@@ -512,18 +609,53 @@ function validateRendered(file) {
       images.map((image) => image.value),
       runtimeBaseImages,
     );
+
+    if (kind === 'Ingress') {
+      const hosts = [
+        ...(document.match(/^\s*(?:-\s+)?host:\s*['"]?([^'"\s]+)/gm) ?? []).map((line) =>
+          line.replace(/^\s*(?:-\s+)?host:\s*['"]?/, '').trim(),
+        ),
+        ...(document.match(/^\s*-\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s*$/gm) ?? []).map((line) =>
+          line.replace(/^\s*-\s+/, '').trim(),
+        ),
+      ];
+      for (const host of hosts) {
+        if (!host) continue;
+        if (PLACEHOLDER_PATTERN.test(host)) {
+          const message = `${context}: host "${host}" is still a placeholder`;
+          if (allowPlaceholders) {
+            note(message);
+          } else {
+            fail(message);
+          }
+          continue;
+        }
+        if (EXAMPLE_HOST_PATTERN.test(host)) {
+          if (namespace === PRODUCTION_NAMESPACE) {
+            note(
+              `${context}: host "${host}" is still an example host of the production ` +
+                'configuration and has to be replaced before a rollout',
+            );
+          } else {
+            fail(`${context}: host "${host}" is still an example host`);
+          }
+        }
+      }
+    }
   }
   validatePinningModes(modes, 'The rendered manifests');
 }
 
 function main() {
   const renderedIndex = process.argv.indexOf('--rendered');
+  const allowPlaceholders = process.argv.includes('--allow-placeholders');
+
   if (renderedIndex !== -1) {
     const renderedFile = process.argv[renderedIndex + 1];
     if (!renderedFile) {
       fail('--rendered requires the path of a rendered manifest');
     } else {
-      validateRendered(renderedFile);
+      validateRendered(renderedFile, allowPlaceholders);
     }
   } else {
     validateSource();

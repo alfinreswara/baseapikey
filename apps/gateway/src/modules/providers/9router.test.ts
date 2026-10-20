@@ -235,7 +235,60 @@ export async function runNineRouterTests(): Promise<void> {
     });
     console.log('  ✅ Request cancellation via AbortSignal passed');
 
-    // Test 13: Registry Integration via registerNineRouter
+    // Test 13: A stream that is aborted must not produce an unhandled
+    // rejection. The cancel of the reader rejects with the abort reason, and
+    // an unhandled rejection would terminate the whole process.
+    const unhandled: unknown[] = [];
+    const unhandledListener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', unhandledListener);
+    try {
+      globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+        const signal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"id":"chunk-1","object":"chat.completion.chunk","created":1700000000,"model":"llama-3.1-70b","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}\n\n',
+              ),
+            );
+            signal?.addEventListener('abort', () => {
+              controller.error(signal.reason ?? new Error('aborted'));
+            });
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }) as typeof fetch;
+
+      const abortController = new AbortController();
+      const abortedStream = await provider.streamChat(normRequest, {
+        signal: abortController.signal,
+      });
+      const iterate = async (): Promise<void> => {
+        for await (const _chunk of abortedStream) {
+          // The first chunk is delivered, the second read is aborted.
+        }
+      };
+      const iteration = iterate();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      abortController.abort();
+      await assert.rejects(iteration, (err: unknown) => err instanceof ProviderError);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(
+        unhandled.length,
+        0,
+        `An aborted stream must not produce an unhandled rejection: ${String(unhandled[0])}`,
+      );
+      console.log('  ✅ An aborted stream does not produce an unhandled rejection');
+    } finally {
+      process.off('unhandledRejection', unhandledListener);
+    }
+
+    // Test 14: Registry Integration via registerNineRouter
     const registry = new ProviderRegistry();
     const registeredInstance = registerNineRouter(registry, {
       apiKey: TEST_API_KEY,

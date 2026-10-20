@@ -14,10 +14,25 @@
 - [ ] Gateway and Dashboard image scans have no unaccepted high or critical finding.
 - [ ] CycloneDX SBOMs exist for both release images and are retained with the release evidence.
 - [ ] The release dry run (`publish=false`) passes before the protected publication run.
+- [ ] The `release` environment exists and requires a reviewer before a publication run.
+- [ ] The image of the tested commit is published and its digest is recorded.
 - [ ] `node scripts/validate-k8s-release.mjs` passes and the rendered production overlay contains
       one shared release identifier for the Gateway, the Dashboard, and the migration job.
 
 ## Staging gates
+
+- [ ] The staging overlay renders, the release validation passes, and the staging namespace
+      holds no production resource.
+- [ ] The migration job applied all migrations to the staging database and the schema matches
+      the Prisma models.
+- [ ] The API key authentication, a chat completion, and a streaming response were verified
+      against the staging database.
+- [ ] A client disconnect releases the upstream request, and an upstream failure is reported as
+      an error response.
+- [ ] A cache outage keeps the instance alive, the readiness reports the cache as unavailable,
+      and the liveness stays healthy.
+- [ ] A SIGTERM during a running stream ends the stream deterministically and the process exits
+      before the termination grace period.
 
 - [ ] Registration, login, refresh rotation, logout, and organization switching work.
 - [ ] API keys are isolated by active organization and member roles are enforced.

@@ -83,6 +83,52 @@ engine version cache under `$HOME/.cache/prisma`; it fails harmlessly on a read 
 does not stop the migration. The job is bound to `activeDeadlineSeconds`, so a database that accepts
 the connection but never answers cannot block a rollout forever.
 
+## Staging environment
+
+The staging environment is a separate overlay of the same base manifests. It
+uses the namespace `baseapikey-staging`, its own configuration, its own TLS
+material, and its own release artifact. It never reads or writes a production
+resource.
+
+```bash
+# Review the manifests before they reach the cluster.
+kubectl kustomize infrastructure/k8s/overlays/staging
+
+# Validate the release configuration without a cluster.
+node scripts/validate-k8s-release.mjs
+node scripts/validate-k8s-release.mjs --rendered <rendered-staging.yaml>
+```
+
+The overlay pins the commit derived tag of the tested commit, for example
+`sha-b8b65ae`, the tag that the release workflow publishes for that commit.
+The image has to be published before the overlay can be applied.
+
+The values that only the project owner can provide are listed in
+`infrastructure/k8s/overlays/staging/README.md`: the staging hosts, the
+`baseapikey-staging-secrets` Secret, the `baseapikey-staging-tls` certificate,
+the staging PostgreSQL and Redis, and the provider and payment sandbox
+credentials. The release validation refuses a rendered manifest that still
+contains a placeholder, so a rollout cannot start with an unresolved host.
+
+The rollout order is the migration first, then the workloads:
+
+```bash
+kubectl apply -k infrastructure/k8s/overlays/staging
+kubectl -n baseapikey-staging logs job/baseapikey-migrate
+kubectl -n baseapikey-staging get deploy,pod,ingress
+```
+
+The staging Prometheus resources are applied separately and watch the staging
+namespace:
+
+```bash
+kubectl apply -k infrastructure/k8s/overlays/monitoring-staging
+```
+
+The rollback of a staging rollout restores the previous image reference in the
+overlay and applies it again. The migrations are forward only, so the database
+is kept as it is.
+
 ## Required external configuration
 
 - PostgreSQL with point-in-time recovery and tested restore credentials.
