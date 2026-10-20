@@ -2,6 +2,13 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 
+import {
+  DEFAULT_DASHBOARD_SHUTDOWN_DRAIN_DELAY_MS,
+  DEFAULT_DASHBOARD_SHUTDOWN_TIMEOUT_MS,
+  scheduleProcessExit,
+  shutdownDashboardServer,
+} from './shutdown';
+
 type DashboardNodeEnv = 'development' | 'staging' | 'production' | 'test';
 
 interface DashboardRuntimeEnv {
@@ -10,6 +17,8 @@ interface DashboardRuntimeEnv {
   host: string;
   publicUrl: string;
   gatewayUrl: string;
+  shutdownDrainDelayMs: number;
+  shutdownTimeoutMs: number;
 }
 
 function parseHttpUrl(name: string, value: string, requireHttps: boolean): string {
@@ -42,6 +51,29 @@ export function parseDashboardRuntimeEnv(
   }
   const host = input['DASHBOARD_HOST']?.trim() || '0.0.0.0';
   const requireHttps = nodeEnv === 'production';
+  const shutdownDrainDelayMs = Number(
+    input['SHUTDOWN_DRAIN_DELAY_MS'] ?? DEFAULT_DASHBOARD_SHUTDOWN_DRAIN_DELAY_MS,
+  );
+  if (
+    !Number.isInteger(shutdownDrainDelayMs) ||
+    shutdownDrainDelayMs < 0 ||
+    shutdownDrainDelayMs > 60_000
+  ) {
+    throw new Error('SHUTDOWN_DRAIN_DELAY_MS must be an integer between 0 and 60000');
+  }
+  const shutdownTimeoutMs = Number(
+    input['SHUTDOWN_TIMEOUT_MS'] ?? DEFAULT_DASHBOARD_SHUTDOWN_TIMEOUT_MS,
+  );
+  if (
+    !Number.isInteger(shutdownTimeoutMs) ||
+    shutdownTimeoutMs < 1_000 ||
+    shutdownTimeoutMs > 600_000
+  ) {
+    throw new Error('SHUTDOWN_TIMEOUT_MS must be an integer between 1000 and 600000');
+  }
+  if (shutdownDrainDelayMs >= shutdownTimeoutMs) {
+    throw new Error('SHUTDOWN_DRAIN_DELAY_MS must be lower than SHUTDOWN_TIMEOUT_MS');
+  }
   return {
     nodeEnv,
     port,
@@ -56,6 +88,8 @@ export function parseDashboardRuntimeEnv(
       input['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3000',
       requireHttps,
     ),
+    shutdownDrainDelayMs,
+    shutdownTimeoutMs,
   };
 }
 
@@ -75,10 +109,15 @@ const contentTypes: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 
-interface DashboardServerOptions {
+export interface DashboardServerState {
+  shuttingDown: boolean;
+}
+
+export interface DashboardServerOptions {
   gatewayUrl?: string;
   publicUrl?: string;
   production?: boolean;
+  state?: DashboardServerState;
 }
 
 class SessionRequestError extends Error {
@@ -343,6 +382,7 @@ export function createDashboardServer(serverOptions: DashboardServerOptions = {}
     gatewayUrl: serverOptions.gatewayUrl ?? runtimeEnv.gatewayUrl,
     publicUrl: serverOptions.publicUrl ?? runtimeEnv.publicUrl,
     production: serverOptions.production ?? runtimeEnv.nodeEnv === 'production',
+    state: serverOptions.state ?? { shuttingDown: false },
   };
 
   return createServer((request, response) => {
@@ -356,6 +396,26 @@ export function createDashboardServer(serverOptions: DashboardServerOptions = {}
       if (requestUrl.pathname === '/health') {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ status: 'ok', service: 'dashboard' }));
+        return;
+      }
+      if (requestUrl.pathname === '/health/live') {
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ status: 'ok', service: 'dashboard' }));
+        return;
+      }
+      if (requestUrl.pathname === '/health/ready') {
+        const shuttingDown = options.state.shuttingDown;
+        response.writeHead(shuttingDown ? 503 : 200, {
+          'Content-Type': 'application/json; charset=utf-8',
+        });
+        response.end(
+          JSON.stringify({
+            status: shuttingDown ? 'error' : 'ok',
+            service: 'dashboard',
+            ready: !shuttingDown,
+            ...(shuttingDown ? { reason: 'Dashboard is shutting down' } : {}),
+          }),
+        );
         return;
       }
       if (requestUrl.pathname === '/config.js') {
@@ -399,7 +459,27 @@ export function createDashboardServer(serverOptions: DashboardServerOptions = {}
 }
 
 if (process.env['NODE_ENV'] !== 'test') {
-  createDashboardServer().listen(port, host, () => {
+  const state: DashboardServerState = { shuttingDown: false };
+  const server = createDashboardServer({ state });
+  const handleShutdown = (signal: NodeJS.Signals): void => {
+    console.log(`Received ${signal}; shutting down BaseAPIKey dashboard`);
+    void shutdownDashboardServer({
+      server,
+      markNotReady: () => {
+        state.shuttingDown = true;
+      },
+      drainDelayMs: runtimeEnv.shutdownDrainDelayMs,
+      timeoutMs: runtimeEnv.shutdownTimeoutMs,
+    }).then((status) => {
+      scheduleProcessExit(status === 'clean' ? 0 : 1);
+    });
+  };
+  // The runtime image is distroless, so Kubernetes cannot run a shell based
+  // preStop hook. It sends SIGTERM to the Node process and the process owns
+  // the termination sequence.
+  process.once('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.once('SIGINT', () => handleShutdown('SIGINT'));
+  server.listen(port, host, () => {
     console.log(`BaseAPIKey dashboard listening at http://${host}:${port}`);
   });
 }

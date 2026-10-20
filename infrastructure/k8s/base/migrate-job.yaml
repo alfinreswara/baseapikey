@@ -16,9 +16,17 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: ghcr.io/example/baseapikey-gateway:latest
+          # The migration job runs from the Gateway image so that the Prisma
+          # schema and the migration history always match the application
+          # release. The overlay pins it to the same release artifact as the
+          # Gateway Deployment.
+          image: ghcr.io/alfinreswara/baseapikey-gateway:RELEASE_TAG_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
           command:
-            - node
+            # The runtime image is distroless: it ships the Node binary at
+            # /nodejs/bin/node and does not add that directory to PATH, so the
+            # executable has to be addressed by its absolute path.
+            - /nodejs/bin/node
             - node_modules/prisma/build/index.js
             - migrate
             - deploy

@@ -1,0 +1,11 @@
+# Optional BaseAPIKey monitoring overlay.
+#
+# The Prometheus Operator custom resources are not part of the base because
+# they fail to apply on clusters without the Prometheus Operator CRDs.
+#
+#   kubectl apply -k infrastructure/k8s/overlays/monitoring
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/monitoring.yaml

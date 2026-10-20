@@ -19,6 +19,13 @@ data:
   USAGE_QUEUE_BATCH_SIZE: '50'
   USAGE_QUEUE_INTERVAL_MS: '250'
   MAX_REQUEST_SIZE: '1048576'
+  # Traffic drain window and total shutdown budget used by the Gateway and the
+  # Dashboard when they receive SIGTERM. The drain window keeps the process
+  # serving in-flight requests while the readiness probe reports the pod as
+  # not ready. The termination grace period of both Deployments must stay
+  # above SHUTDOWN_TIMEOUT_MS so the process can exit before SIGKILL.
+  SHUTDOWN_DRAIN_DELAY_MS: '10000'
+  SHUTDOWN_TIMEOUT_MS: '30000'
   JWT_ACCESS_EXPIRES_IN: 15m
   JWT_REFRESH_EXPIRES_IN: 7d
   DASHBOARD_PORT: '3001'

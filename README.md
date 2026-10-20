@@ -72,9 +72,19 @@ production, complete [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) an
 
 Pull requests are gated by workspace checks, browser E2E, migration verification, dependency and
 secret scans, infrastructure policy scanning, container vulnerability scanning, SBOM generation,
-and CodeQL. Release images are built manually from `main` by `.github/workflows/release.yml`; start
-with `publish=false`, then use the protected `release` environment to approve a versioned GHCR
-publication.
+Kubernetes manifest validation, and CodeQL. Release images are built manually from `main` by
+`.github/workflows/release.yml`; start with `publish=false`, then use the protected `release`
+environment to approve a versioned GHCR publication.
+
+The Kubernetes manifests are applied through a Kustomize overlay that pins the released artifacts:
+
+```bash
+kubectl kustomize infrastructure/k8s/overlays/production
+kubectl apply -k infrastructure/k8s/overlays/production
+```
+
+The Gateway, the Dashboard, and the migration job always run the same release. Validate the release
+configuration without a cluster with `pnpm run validate:k8s`.
 
 ---
 

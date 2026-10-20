@@ -22,7 +22,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: ghcr.io/example/baseapikey-gateway:latest
+          # Release artifact pinned by infrastructure/k8s/overlays/production.
+          image: ghcr.io/alfinreswara/baseapikey-gateway:RELEASE_TAG_PLACEHOLDER
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -49,9 +50,9 @@ spec:
               path: /health/ready
               port: http
             initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            periodSeconds: 5
+            timeoutSeconds: 8
+            failureThreshold: 2
           livenessProbe:
             httpGet:
               path: /health/live
@@ -59,11 +60,15 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 20
             timeoutSeconds: 5
-          lifecycle:
-            preStop:
-              exec:
-                command: ['/bin/sh', '-c', 'kill -TERM 1; sleep 5']
-      terminationGracePeriodSeconds: 40
+          # No preStop hook is configured on purpose. The runtime image is
+          # distroless and contains no /bin/sh, so a shell based hook can never
+          # run. Kubernetes sends SIGTERM to the Node process (PID 1) instead,
+          # and the Gateway handles it: it reports itself as not ready, drains
+          # traffic for SHUTDOWN_DRAIN_DELAY_MS, stops accepting connections,
+          # waits for in-flight requests, and then closes Redis and PostgreSQL.
+          # The grace period must stay above SHUTDOWN_TIMEOUT_MS so the
+          # process can exit on its own before Kubernetes sends SIGKILL.
+          terminationGracePeriodSeconds: 45
 ---
 apiVersion: v1
 kind: Service

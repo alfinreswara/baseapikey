@@ -1,0 +1,20 @@
+# BaseAPIKey Kubernetes base manifests.
+#
+# This base is never applied on its own: the release artifact (image tag or
+# digest) is pinned by the deployment overlay, for example
+# `kubectl apply -k infrastructure/k8s/overlays/production`.
+#
+# `secret.example.yaml` is intentionally not listed here. The
+# `baseapikey-secrets` Secret must be created from a secret manager by the
+# operator and must never be sourced from this repository.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - platform.yaml
+  - configmap.yaml
+  - gateway.yaml
+  - dashboard.yaml
+  - migrate-job.yaml
+  - backup.yaml

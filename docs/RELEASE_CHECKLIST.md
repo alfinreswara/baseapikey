@@ -14,6 +14,8 @@
 - [ ] Gateway and Dashboard image scans have no unaccepted high or critical finding.
 - [ ] CycloneDX SBOMs exist for both release images and are retained with the release evidence.
 - [ ] The release dry run (`publish=false`) passes before the protected publication run.
+- [ ] `node scripts/validate-k8s-release.mjs` passes and the rendered production overlay contains
+      one shared release identifier for the Gateway, the Dashboard, and the migration job.
 
 ## Staging gates
 
@@ -27,6 +29,8 @@
 - [ ] Email verification, password reset, and organization invitation emails arrive and expire correctly.
 - [ ] PostgreSQL and Redis outage behavior, recovery, and readiness probes are verified.
 - [ ] Streaming cancellation, graceful shutdown, and usage queue drain are verified under load.
+- [ ] SIGTERM removes the pod from the Service through readiness, in-flight requests finish, and the
+      process exits before `terminationGracePeriodSeconds` expires.
 
 ## Operations gates
 

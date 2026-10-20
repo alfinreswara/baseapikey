@@ -79,6 +79,8 @@ export const GatewayEnvSchema = z
     BILLING_WEBHOOK_SECRET: z.string().min(32).optional(),
     CORS_ORIGIN: z.string().default('*'),
     MAX_REQUEST_SIZE: z.coerce.number().int().positive().default(1048576),
+    SHUTDOWN_DRAIN_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(10_000),
+    SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
     JWT_ACCESS_SECRET: z
       .string()
       .min(1, 'JWT_ACCESS_SECRET is required')
@@ -91,6 +93,14 @@ export const GatewayEnvSchema = z
     JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   })
   .superRefine((env, ctx) => {
+    if (env.SHUTDOWN_DRAIN_DELAY_MS >= env.SHUTDOWN_TIMEOUT_MS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SHUTDOWN_DRAIN_DELAY_MS'],
+        message: 'SHUTDOWN_DRAIN_DELAY_MS must be lower than SHUTDOWN_TIMEOUT_MS',
+      });
+    }
+
     if (env.ACCOUNT_EMAIL_WEBHOOK_URL && !env.ACCOUNT_EMAIL_WEBHOOK_SECRET) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

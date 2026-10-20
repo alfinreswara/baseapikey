@@ -121,6 +121,7 @@ jobs:
         migration-check,
         dependency-audit,
         infrastructure-security,
+        kubernetes-manifests,
         secret-scan,
       ]
     steps:
@@ -300,6 +301,29 @@ jobs:
           exit-code: '1'
           severity: HIGH,CRITICAL
           version: v0.74.0
+
+  kubernetes-manifests:
+    name: Kubernetes Manifest Validation
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate the release configuration
+        run: node scripts/validate-k8s-release.mjs
+
+      - name: Render the production overlay
+        run: |
+          if ! command -v kubectl >/dev/null 2>&1; then
+            echo "kubectl is required to render the Kubernetes overlays" >&2
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/manifests"
+          kubectl kustomize infrastructure/k8s/overlays/production \
+            > "${RUNNER_TEMP}/manifests/baseapikey-production.yaml"
+
+      - name: Validate the rendered manifests
+        run: node scripts/validate-k8s-release.mjs --rendered "${RUNNER_TEMP}/manifests/baseapikey-production.yaml"
 
   secret-scan:
     name: Repository Secret Scan

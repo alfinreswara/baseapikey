@@ -1,0 +1,42 @@
+# BaseAPIKey production overlay.
+#
+# This file is the single place where the released container artifacts are
+# pinned. The Gateway, the Dashboard, and the migration job all resolve to the
+# same release identifier, so the migration job can never run against a
+# different schema version than the running application.
+#
+# Release procedure:
+#   1. Build and publish the images with `.github/workflows/release.yml`
+#      (workflow dispatch, semantic version, `publish=true`). The workflow
+#      publishes `ghcr.io/alfinreswara/baseapikey-gateway` and
+#      `ghcr.io/alfinreswara/baseapikey-dashboard` with the release tag and a
+#      `sha-<commit>` tag.
+#   2. Set `newTag` below to the published release tag (for example `v0.1.0`).
+#   3. Preferred for production: replace `newTag` with the published digest,
+#      for example `digest: sha256:<64 hex characters>`, so the deployment can
+#      never change even if the tag is moved.
+#   4. Render and review before applying:
+#        kubectl kustomize infrastructure/k8s/overlays/production
+#
+# The images referenced here are produced by this repository's release
+# workflow. They are not published automatically and no third-party image is
+# used as a substitute.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# The release version is declared once and travels with every rendered
+# resource, so the deployed artifacts can always be traced back to a release.
+labels:
+  - pairs:
+      app.kubernetes.io/version: v0.1.0
+
+images:
+  - name: ghcr.io/alfinreswara/baseapikey-gateway
+    newName: ghcr.io/alfinreswara/baseapikey-gateway
+    newTag: v0.1.0
+  - name: ghcr.io/alfinreswara/baseapikey-dashboard
+    newName: ghcr.io/alfinreswara/baseapikey-dashboard
+    newTag: v0.1.0

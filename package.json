@@ -10,6 +10,7 @@
     "typecheck": "turbo run type-check",
     "type-check": "turbo run type-check",
     "test": "turbo run test",
+    "validate:k8s": "node scripts/validate-k8s-release.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"

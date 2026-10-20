@@ -11,6 +11,7 @@ import { PrismaApiKeyRepository } from './modules/api-keys/repositories/api-key.
 import { RedisLoginRateLimiter } from './modules/auth/utils/redis-login-rate-limiter';
 import { PrismaOrganizationBillingGuard } from './modules/billing/middleware/billing-usage.middleware';
 import { HealthService } from './modules/health/health.service';
+import { ShutdownCoordinator, scheduleProcessExit } from './modules/lifecycle/shutdown';
 import { RedisModelCatalogCache } from './modules/models/cache/model-catalog.cache';
 import { WebhookErrorReporter } from './modules/observability/error-reporter';
 import { PrismaOrganizationContextResolver } from './modules/organizations/middleware/organization-context.middleware';
@@ -38,51 +39,60 @@ async function start(): Promise<void> {
   });
 
   let app: FastifyInstance | undefined;
+  let healthService: HealthService | undefined;
   let providerHealthMonitor: ProviderHealthMonitor | undefined;
   let usageWorker: RedisUsageWorker | undefined;
-  let shuttingDown = false;
 
-  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-    if (shuttingDown || !app) {
-      return;
-    }
-    shuttingDown = true;
-    providerHealthMonitor?.stop();
-    await usageWorker?.stop();
-
-    console.log(`Received ${signal}; shutting down Gateway API`);
-    const forceShutdownTimer = setTimeout(() => {
-      console.error('Gateway shutdown timed out after 30 seconds');
+  // Kubernetes sends SIGTERM to PID 1 because the distroless runtime image
+  // cannot run a shell based preStop hook. The coordinator owns the whole
+  // termination sequence: it stops advertising readiness, drains traffic,
+  // stops the background workers, closes the HTTP server, and only then
+  // releases the Redis and PostgreSQL connections.
+  const shutdownCoordinator = new ShutdownCoordinator({
+    hooks: {
+      markNotReady: () => {
+        healthService?.markShuttingDown();
+      },
+      stopBackgroundWork: async () => {
+        providerHealthMonitor?.stop();
+        await usageWorker?.stop();
+      },
+      closeServer: async () => {
+        if (app) {
+          await app.close();
+        }
+      },
+      closeResources: async () => {
+        const results = await Promise.allSettled([
+          redisClient.isOpen ? redisClient.close() : Promise.resolve(),
+          prisma.$disconnect(),
+        ]);
+        const failedResult = results.find(
+          (result): result is PromiseRejectedResult => result.status === 'rejected',
+        );
+        if (failedResult) {
+          throw failedResult.reason;
+        }
+      },
+    },
+    drainDelayMs: env.SHUTDOWN_DRAIN_DELAY_MS,
+    timeoutMs: env.SHUTDOWN_TIMEOUT_MS,
+    onTimeout: () => {
+      console.error('Gateway shutdown timed out, forcing exit');
       process.exit(1);
-    }, 30_000);
-    forceShutdownTimer.unref();
+    },
+  });
 
-    try {
-      const results = await Promise.allSettled([
-        app.close(),
-        redisClient.isOpen ? redisClient.close() : Promise.resolve(),
-        prisma.$disconnect(),
-      ]);
-      const failedResult = results.find(
-        (result): result is PromiseRejectedResult => result.status === 'rejected',
-      );
-      if (failedResult) {
-        throw failedResult.reason;
-      }
-      clearTimeout(forceShutdownTimer);
-      console.log('Gateway API shut down cleanly');
-      process.exitCode = 0;
-    } catch (error) {
-      clearTimeout(forceShutdownTimer);
-      console.error('Failed to shut down Gateway API cleanly:', error);
-      process.exitCode = 1;
-    }
+  const handleShutdown = async (signal: NodeJS.Signals): Promise<void> => {
+    console.log(`Received ${signal}; shutting down Gateway API`);
+    const result = await shutdownCoordinator.shutdown(signal);
+    scheduleProcessExit(result.status === 'clean' ? 0 : 1);
   };
 
   try {
     await redisClient.connect();
 
-    const healthService = new HealthService(
+    healthService = new HealthService(
       'gateway',
       '0.1.0',
       env.NODE_ENV,
@@ -207,8 +217,8 @@ async function start(): Promise<void> {
       ...(env.BILLING_WEBHOOK_SECRET ? { billingWebhookSecret: env.BILLING_WEBHOOK_SECRET } : {}),
     });
 
-    process.once('SIGTERM', () => void shutdown('SIGTERM'));
-    process.once('SIGINT', () => void shutdown('SIGINT'));
+    process.once('SIGTERM', () => void handleShutdown('SIGTERM'));
+    process.once('SIGINT', () => void handleShutdown('SIGINT'));
 
     const address = await app.listen({
       port: env.PORT,

@@ -20,6 +20,8 @@ export interface ReadinessCheckDetail {
 export interface ReadinessResponse {
   status: 'ok' | 'error';
   ready: boolean;
+  /** Explains why the instance is not ready, for example during shutdown. */
+  reason?: string;
   checks: {
     database: ReadinessCheckDetail;
     redis: ReadinessCheckDetail;
@@ -41,6 +43,7 @@ export class HealthService {
   private readonly serviceName: string;
   private readonly version: string;
   private readonly environment: string;
+  private shuttingDown = false;
 
   constructor(
     serviceName = 'gateway',
@@ -52,6 +55,19 @@ export class HealthService {
     this.serviceName = serviceName;
     this.version = version;
     this.environment = environment;
+  }
+
+  /**
+   * Marks the instance as shutting down. Readiness then fails while the
+   * process keeps serving in-flight requests, so the load balancer removes
+   * the pod from the Service before the listener is closed.
+   */
+  markShuttingDown(): void {
+    this.shuttingDown = true;
+  }
+
+  isShuttingDown(): boolean {
+    return this.shuttingDown;
   }
 
   getHealth(): HealthStatusResponse {
@@ -73,6 +89,23 @@ export class HealthService {
   }
 
   async getReadiness(): Promise<ReadinessResponse> {
+    if (this.shuttingDown) {
+      const detail: ReadinessCheckDetail = {
+        status: 'error',
+        message: 'Gateway is shutting down',
+      };
+      return {
+        status: 'error',
+        ready: false,
+        reason: 'Gateway is shutting down',
+        checks: {
+          database: detail,
+          redis: detail,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const [dbCheck, redisCheck] = await Promise.all([
       this.runReadinessCheck('Database', () => this.readinessChecks.database()),
       this.runReadinessCheck('Redis', () => this.readinessChecks.redis()),

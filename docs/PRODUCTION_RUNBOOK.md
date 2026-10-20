@@ -9,21 +9,53 @@
 3. Re-run the same version with `publish=true` after approval. Record the published image digests,
    BuildKit provenance/SBOM attestations, workflow URL, and source commit; deploy by digest rather
    than by a mutable tag.
-4. Run `prisma migrate deploy` as a one-shot job against a sanitized production copy, then take the
+4. Pin the published artifacts in `infrastructure/k8s/overlays/production/kustomization.yaml`. That
+   overlay is the only place that names the release, and it pins the Gateway, the Dashboard, and the
+   migration job to the same release identifier. Validate it with
+   `node scripts/validate-k8s-release.mjs` before every rollout.
+5. Run `prisma migrate deploy` as a one-shot job against a sanitized production copy, then take the
    production snapshot and execute the migration job before rolling out Gateway pods.
-5. Deploy one canary Gateway replica, verify `/health/ready`, `/metrics`, login, model listing, and a
+6. Deploy one canary Gateway replica, verify `/health/ready`, `/metrics`, login, model listing, and a
    low-cost inference request.
-6. Roll out the remaining Gateway and Dashboard replicas and watch error rate, latency, Redis queue
+7. Roll out the remaining Gateway and Dashboard replicas and watch error rate, latency, Redis queue
    depth, provider health, and billing events.
-7. Keep the previous image digest available until the release has completed its observation window.
+8. Keep the previous image digest available until the release has completed its observation window.
 
 The workflow only builds and optionally publishes images; it deliberately does not deploy to a
 cluster. Cluster credentials, namespaces, domains, and promotion policy must be supplied by the
 operator. Never publish a version that was already used for different image content.
 
-The Kubernetes examples live in `infrastructure/k8s`. Replace example hosts and images, create
-`baseapikey-secrets` from a secret manager, and configure managed PostgreSQL and Redis before
-applying the manifests.
+The Kubernetes manifests live in `infrastructure/k8s`. `infrastructure/k8s/base` holds the shared
+resources, `infrastructure/k8s/overlays/production` pins the released artifacts, and
+`infrastructure/k8s/overlays/monitoring` holds the optional Prometheus resources. Apply the
+production overlay, never the base:
+
+```bash
+kubectl kustomize infrastructure/k8s/overlays/production
+kubectl apply -k infrastructure/k8s/overlays/production
+```
+
+The base is not deployable on its own: the image references in the base manifests are placeholders
+that the overlay replaces with the released tag or digest. Create `baseapikey-secrets` from a secret
+manager, replace the example hosts in `infrastructure/k8s/base/platform.yaml`, and configure managed
+PostgreSQL and Redis before applying the manifests.
+
+## Graceful shutdown
+
+The runtime images are distroless. They contain no shell, and the Node binary lives at
+`/nodejs/bin/node` instead of `PATH`, so no `preStop` hook can run a shell command. Kubernetes
+sends SIGTERM to the Node process instead, and both services own their termination sequence:
+
+1. The readiness endpoint reports the instance as not ready while liveness stays healthy, so the
+   load balancer removes the pod from the Service.
+2. The process keeps serving in-flight requests for `SHUTDOWN_DRAIN_DELAY_MS`.
+3. The HTTP server stops accepting connections and waits for the running requests to finish.
+4. The background workers, Redis, and PostgreSQL connections are closed.
+
+`SHUTDOWN_TIMEOUT_MS` is the total budget of that sequence and must stay below
+`terminationGracePeriodSeconds` of the workloads, otherwise Kubernetes sends SIGKILL while requests
+are still running. The current manifests use a 10 second drain window, a 30 second budget, and a 45
+second grace period.
 
 ## Required external configuration
 
