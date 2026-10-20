@@ -30,7 +30,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 RUN node /runtime/gateway/node_modules/prisma/build/index.js generate \
     --schema=/runtime/gateway/node_modules/@baseapikey/database/prisma/schema.prisma
 
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:55de7e48a8414e7aff825207c0b3c0f7db3b10133efc50d748560c27c9053be1 AS runtime
 
 ENV NODE_ENV=production
 ENV PORT=3000

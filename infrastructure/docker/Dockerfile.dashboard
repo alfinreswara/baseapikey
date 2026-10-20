@@ -13,7 +13,7 @@ COPY apps/dashboard apps/dashboard
 COPY packages/config packages/config
 RUN pnpm --filter @baseapikey/dashboard build
 
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:55de7e48a8414e7aff825207c0b3c0f7db3b10133efc50d748560c27c9053be1 AS runtime
 ENV NODE_ENV=production
 ENV DASHBOARD_PORT=3001
 ENV DASHBOARD_HOST=0.0.0.0

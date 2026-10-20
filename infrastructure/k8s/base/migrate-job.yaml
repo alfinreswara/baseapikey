@@ -38,6 +38,10 @@ spec:
             # under $HOME/.cache/prisma. It fails harmlessly on a read only
             # filesystem and does not stop the migration.
             - /nodejs/bin/node
+            # The runtime image starts node with --use-openssl-ca so that the
+            # system certificate store is used. The job replaces the entry
+            # point and has to pass the same option.
+            - --use-openssl-ca
             - node_modules/prisma/build/index.js
             - migrate
             - deploy
