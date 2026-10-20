@@ -73,13 +73,13 @@ patches:
 # resource, so the deployed artifacts can always be traced back to a commit.
 labels:
   - pairs:
-      app.kubernetes.io/version: sha-b8b65ae
+      app.kubernetes.io/version: v0.1.0
       app.kubernetes.io/environment: staging
 
 images:
   - name: ghcr.io/alfinreswara/baseapikey-gateway
     newName: ghcr.io/alfinreswara/baseapikey-gateway
-    newTag: sha-b8b65ae
+    newTag: v0.1.0
   - name: ghcr.io/alfinreswara/baseapikey-dashboard
     newName: ghcr.io/alfinreswara/baseapikey-dashboard
-    newTag: sha-b8b65ae
+    newTag: v0.1.0

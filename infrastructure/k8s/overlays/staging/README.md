@@ -46,16 +46,19 @@ hosts, and `CORS_ORIGIN` has to allow the staging Dashboard origin only.
 
 ## Image
 
-The overlay pins the commit derived tag `sha-b8b65ae`, the tag that
-`.github/workflows/release.yml` publishes for the tested commit. The image
-has to exist in the registry before the overlay is applied:
+The overlay pins the release candidate `v0.1.0`. The release workflow
+publishes that tag and a commit derived tag (`sha-<commit>`) for the published
+commit, for example `sha-acfdd30` for the commit that the staging validation
+used. The image has to exist in the registry before the overlay is applied:
 
 ```bash
 gh workflow run "Build Release Images" -f version=v0.1.0 -f publish=true
 ```
 
 Do not reuse a version tag for different image content, and prefer the
-published digest over the tag for a repeatable rollout.
+published digest over the tag for a repeatable rollout. The promotion path
+from staging to production uses the same artifact: record the digest of the
+staging rollout and pin the production overlay to that digest.
 
 ## Rollout
 
