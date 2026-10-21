@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import type { CreditAuthorizationService } from '../../billing/services/credit-authorization.service';
 import { RESERVATION_LIFETIME_MS } from '../../billing/services/reservation.service';
+import { createRequestDeadline, DEFAULT_REQUEST_DEADLINE_MS } from '../../common/request-deadline';
 import {
   estimateMaxCostMicros,
   estimateModelCostUsd,
@@ -43,6 +44,7 @@ export class InferenceController {
     private readonly service: InferenceService,
     private readonly policyResolver: ModelPolicyResolver,
     private readonly creditAuthorization: CreditAuthorizationService,
+    private readonly requestDeadlineMs: number = DEFAULT_REQUEST_DEADLINE_MS,
   ) {}
 
   /**
@@ -100,8 +102,10 @@ export class InferenceController {
       model: policy.modelId,
       ...(reservationId ? { reservationId } : {}),
     };
-    const result = await this.withAbort(reply, (signal) =>
-      this.service.createEmbedding(dto, { signal }),
+    const result = await this.withAbort(
+      reply,
+      (signal) => this.service.createEmbedding(dto, { signal }),
+      reservationId,
     );
     request.usageMetadata = {
       ...request.usageMetadata,
@@ -131,8 +135,10 @@ export class InferenceController {
       model: policy.modelId,
       ...(reservationId ? { reservationId } : {}),
     };
-    const result = await this.withAbort(reply, (signal) =>
-      this.service.createImage(dto, { signal }),
+    const result = await this.withAbort(
+      reply,
+      (signal) => this.service.createImage(dto, { signal }),
+      reservationId,
     );
     request.usageMetadata = {
       ...request.usageMetadata,
@@ -156,8 +162,10 @@ export class InferenceController {
       model: policy.modelId,
       ...(reservationId ? { reservationId } : {}),
     };
-    const result = await this.withAbort(reply, (signal) =>
-      this.service.createSpeech(dto, { signal }),
+    const result = await this.withAbort(
+      reply,
+      (signal) => this.service.createSpeech(dto, { signal }),
+      reservationId,
     );
     request.usageMetadata = {
       ...request.usageMetadata,
@@ -189,8 +197,10 @@ export class InferenceController {
       model: policy.modelId,
       ...(reservationId ? { reservationId } : {}),
     };
-    const result = await this.withAbort(reply, (signal) =>
-      this.service.transcribeAudio(fields, multipart.file, { signal }),
+    const result = await this.withAbort(
+      reply,
+      (signal) => this.service.transcribeAudio(fields, multipart.file, { signal }),
+      reservationId,
     );
     if (typeof result === 'string') {
       void reply.type('text/plain; charset=utf-8').status(200).send(result);
@@ -202,6 +212,7 @@ export class InferenceController {
   private async withAbort<T>(
     reply: FastifyReply,
     operation: (signal: AbortSignal) => Promise<T>,
+    reservationId: string | null = null,
   ): Promise<T> {
     const controller = new AbortController();
     // The request stream ends as soon as the body was consumed, which is not
@@ -213,9 +224,24 @@ export class InferenceController {
       }
     };
     reply.raw.on('close', onClose);
+
+    // The lease of the reservation keeps the credit of the request reserved
+    // while the request is running.
+    const lease = this.creditAuthorization.startLease(reservationId, (reason) => {
+      controller.abort(
+        new Error(`The credit guarantee of the request was lost: ${reason} (timeout)`),
+      );
+    });
+
+    // The deadline bounds the whole request, the provider timeout only bounds
+    // a single provider call.
+    const deadline = createRequestDeadline(this.requestDeadlineMs);
+
     try {
       return await operation(controller.signal);
     } finally {
+      deadline.cancel();
+      lease?.stop();
       reply.raw.removeListener('close', onClose);
     }
   }

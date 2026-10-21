@@ -5,6 +5,7 @@ export * from './utils/hash.util';
 export * from './types/api.type';
 export * from './constants/error-codes.constant';
 export * from './constants/roles.constant';
+export * from './constants/billing.constant';
 export * from './errors/app-error';
 export * from './providers/provider.types';
 export * from './providers/provider.error';

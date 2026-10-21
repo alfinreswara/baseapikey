@@ -1,4 +1,5 @@
 import { prisma } from '@baseapikey/database';
+import { RESERVATION_LIFETIME_MS, RESERVATION_RENEWAL_INTERVAL_MS } from '@baseapikey/shared';
 
 /**
  * The unit of the reservation is the micro dollar. One cent are ten thousand
@@ -6,13 +7,7 @@ import { prisma } from '@baseapikey/database';
  */
 export const MICROS_PER_CENT = 10_000;
 
-/**
- * The deadline of a reservation. It is longer than the maximum lifetime of a
- * request (the provider timeout plus the shutdown drain), so a reservation is
- * only recovered when the request can no longer be running. The recovery
- * never releases a reservation of a running request.
- */
-export const RESERVATION_LIFETIME_MS = 120_000;
+export { RESERVATION_LIFETIME_MS, RESERVATION_RENEWAL_INTERVAL_MS };
 
 export type ReservationStatus = 'RESERVED' | 'SETTLED' | 'RELEASED' | 'EXPIRED';
 export type ReservationModality = 'chat' | 'embedding' | 'image' | 'speech' | 'transcription';
@@ -54,6 +49,12 @@ export interface IReservationService {
   reserve(input: ReserveCreditInput): Promise<ReservationResult>;
   settle(input: SettleReservationInput): Promise<SettlementOutcome>;
   release(reservationId: string, reason: string): Promise<boolean>;
+  /**
+   * Extends the lease of a reservation that is still in use. The renewal
+   * fails when the reservation is no longer reserved, a recovered or a
+   * settled reservation can not be renewed.
+   */
+  renew(reservationId: string, expiresAt: Date): Promise<boolean>;
   /** Returns the reservations that were recovered. */
   recoverExpiredReservations(organizationId?: string): Promise<number>;
 }
@@ -255,6 +256,21 @@ export class PrismaReservationService implements IReservationService {
   }
 
   /**
+   * Extends the lease of a reservation that is still in use.
+   *
+   * The update is conditional on the status, so a reservation that was
+   * settled, released or recovered in the meantime is never renewed. The
+   * renewal only touches the deadline, the held credit is not changed.
+   */
+  async renew(reservationId: string, expiresAt: Date): Promise<boolean> {
+    const renewed = await prisma.billingReservation.updateMany({
+      where: { id: reservationId, status: 'RESERVED' },
+      data: { expiresAt },
+    });
+    return renewed.count > 0;
+  }
+
+  /**
    * Recovers the reservations of the requests that can no longer be running.
    * The recovery only touches the reservations whose deadline has passed, the
    * deadline is derived from the maximum lifetime of a request and not from an
@@ -289,8 +305,15 @@ export class PrismaReservationService implements IReservationService {
 
       let recovered = 0;
       for (const reservation of expired) {
+        // The deadline is checked again in the update, so a lease that was
+        // renewed between the read and the update wins. The recovery never
+        // releases the credit of a request that is still running.
         const transitioned = await tx.billingReservation.updateMany({
-          where: { id: reservation.id, status: 'RESERVED' },
+          where: {
+            id: reservation.id,
+            status: 'RESERVED',
+            expiresAt: { lt: new Date() },
+          },
           data: { status: 'EXPIRED' },
         });
         if (transitioned.count === 0) {

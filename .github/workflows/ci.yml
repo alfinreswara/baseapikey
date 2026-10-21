@@ -225,6 +225,8 @@ jobs:
   migration-check:
     name: Prisma Migration Check
     runs-on: ubuntu-24.04
+    # This job is a required check. It runs the billing integration tests of
+    # the credit reservation against a real PostgreSQL, never against a mock.
     services:
       postgres:
         image: postgres:16-alpine
@@ -241,6 +243,8 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://baseapikey:baseapikey_ci_password@localhost:5432/baseapikey_ci?schema=public
+      # The integration tests may not be skipped when the database is missing.
+      CI: 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -257,6 +261,30 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify the test database is isolated
+        run: |
+          case "${DATABASE_URL}" in
+            *localhost*|*127.0.0.1*)
+              echo "The integration tests use the isolated database of the job"
+              ;;
+            *)
+              echo "The integration tests must not use a remote database" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify the database is reachable
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if pg_isready -h localhost -p 5432 -U baseapikey -d baseapikey_ci; then
+              exit 0
+            fi
+            echo "The database is not ready yet (attempt ${attempt})" >&2
+            sleep 3
+          done
+          echo "The PostgreSQL service of the job is not reachable" >&2
+          exit 1
+
       - name: Apply migrations to an empty database
         run: pnpm --filter @baseapikey/database exec prisma migrate deploy --schema prisma/schema.prisma
 
@@ -264,14 +292,17 @@ jobs:
         run: pnpm --filter @baseapikey/database exec prisma migrate status --schema prisma/schema.prisma
 
       - name: Run the billing concurrency tests
-        run: pnpm --filter @baseapikey/gateway test:concurrency
-        env:
-          DATABASE_URL: postgresql://baseapikey:baseapikey_ci_password@localhost:5432/baseapikey_ci?schema=public
+        run: |
+          pnpm --filter @baseapikey/gateway test:concurrency | tee "${RUNNER_TEMP}/concurrency.log"
+          grep -q "All Billing Concurrency Tests passed successfully" "${RUNNER_TEMP}/concurrency.log"
 
-      - name: Run the credit reservation concurrency tests
-        run: pnpm --filter @baseapikey/gateway test:reservation
-        env:
-          DATABASE_URL: postgresql://baseapikey:baseapikey_ci_password@localhost:5432/baseapikey_ci?schema=public
+      - name: Run the credit reservation tests
+        run: |
+          pnpm --filter @baseapikey/gateway test:reservation | tee "${RUNNER_TEMP}/reservation.log"
+          grep -q "All Credit Reservation Concurrency Tests passed successfully" "${RUNNER_TEMP}/reservation.log"
+          grep -q "All Credit Reservation Lifetime Tests passed successfully" "${RUNNER_TEMP}/reservation.log"
+          grep -q "All Reservation Recovery Tests passed successfully" "${RUNNER_TEMP}/reservation.log"
+          grep -q "All Reservation Lease Tests passed successfully" "${RUNNER_TEMP}/reservation.log"
 
   dependency-audit:
     name: Production Dependency Audit

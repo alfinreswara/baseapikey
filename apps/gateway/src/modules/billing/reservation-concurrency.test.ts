@@ -17,6 +17,10 @@ import { PrismaReservationService } from './services/reservation.service';
 const DATABASE_URL = process.env['DATABASE_URL'];
 
 if (!DATABASE_URL) {
+  if (process.env['CI']) {
+    console.error('❌ DATABASE_URL is required, the reservation tests can not be skipped in CI');
+    process.exit(1);
+  }
   console.log('⚠️  Skipping the reservation concurrency tests, DATABASE_URL is not set');
   process.exit(0);
 }

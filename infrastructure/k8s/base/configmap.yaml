@@ -29,6 +29,12 @@ data:
   # Interval of the recovery of the credit reservations whose request can no
   # longer be running.
   RESERVATION_RECOVERY_INTERVAL_MS: '60000'
+  # Interval of the renewal of the lease of a credit reservation. It has to
+  # be shorter than the lease itself, the gateway rejects a longer interval.
+  RESERVATION_RENEWAL_INTERVAL_MS: '30000'
+  # Deadline of a request that reaches a provider. It bounds the whole
+  # request, the provider timeout only bounds a single provider call.
+  REQUEST_DEADLINE_MS: '300000'
   JWT_ACCESS_EXPIRES_IN: 15m
   JWT_REFRESH_EXPIRES_IN: 7d
   DASHBOARD_PORT: '3001'

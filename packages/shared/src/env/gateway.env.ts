@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { RESERVATION_LIFETIME_MS } from '../constants/billing.constant';
+
 const DEFAULT_ACCESS_SECRET = 'default_jwt_access_secret_32chars_min_len';
 const DEFAULT_REFRESH_SECRET = 'default_jwt_refresh_secret_32chars_min_len';
 const EXAMPLE_PROVIDER_ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
@@ -90,6 +92,21 @@ export const GatewayEnvSchema = z
       .min(1_000)
       .max(3_600_000)
       .default(60_000),
+    /**
+     * The deadline of a request that reaches a provider. It bounds the whole
+     * request, the provider timeout only bounds a single provider call.
+     */
+    REQUEST_DEADLINE_MS: z.coerce.number().int().min(30_000).max(3_600_000).default(300_000),
+    /**
+     * The interval between two renewals of the lease of a reservation. It has
+     * to be shorter than the lease itself, the refinement below enforces it.
+     */
+    RESERVATION_RENEWAL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(5_000)
+      .max(600_000)
+      .default(30_000),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
     JWT_ACCESS_SECRET: z
       .string()
@@ -103,6 +120,17 @@ export const GatewayEnvSchema = z
     JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   })
   .superRefine((env, ctx) => {
+    // The lease of a reservation has to be renewed before it ends, otherwise
+    // the credit of a running request can be recovered while the request is
+    // still working.
+    if (env.RESERVATION_RENEWAL_INTERVAL_MS >= RESERVATION_LIFETIME_MS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RESERVATION_RENEWAL_INTERVAL_MS'],
+        message: `RESERVATION_RENEWAL_INTERVAL_MS has to be shorter than the lease of ${RESERVATION_LIFETIME_MS}ms`,
+      });
+    }
+
     if (env.SHUTDOWN_DRAIN_DELAY_MS >= env.SHUTDOWN_TIMEOUT_MS) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

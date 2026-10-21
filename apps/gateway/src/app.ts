@@ -149,6 +149,13 @@ export interface BuildAppOptions {
   modelPolicyResolver?: ModelPolicyResolver;
   /** Reserves the credit of the requests and recovers the expired ones. */
   reservationService?: IReservationService;
+  /**
+   * The deadline of a request that reaches a provider. It bounds the lifetime
+   * of a request, the provider timeout only bounds a single provider call.
+   */
+  requestDeadlineMs?: number;
+  /** The duration and the renewal interval of the lease of a reservation. */
+  reservationLease?: { lifetimeMs?: number; renewalIntervalMs?: number };
 }
 
 /** Routes that stay reachable while the instance drains. */
@@ -258,7 +265,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // The credit of a request is reserved before it reaches a provider and
   // settled when the real usage is known.
   const reservationService = options.reservationService ?? new PrismaReservationService();
-  const creditAuthorization = new CreditAuthorizationService(reservationService);
+  const creditAuthorization = new CreditAuthorizationService(reservationService, {
+    ...(options.reservationLease?.lifetimeMs !== undefined
+      ? { leaseLifetimeMs: options.reservationLease.lifetimeMs }
+      : {}),
+    ...(options.reservationLease?.renewalIntervalMs !== undefined
+      ? { leaseRenewalIntervalMs: options.reservationLease.renewalIntervalMs }
+      : {}),
+  });
   const modelPolicyResolver: ModelPolicyResolver =
     options.modelPolicyResolver ??
     (inferenceModelResolver
@@ -493,6 +507,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
     modelPolicyResolver,
+    ...(options.requestDeadlineMs !== undefined
+      ? { requestDeadlineMs: options.requestDeadlineMs }
+      : {}),
   });
   void app.register(inferenceRoutes, {
     apiKeyRepository,
@@ -504,6 +521,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
     modelPolicyResolver,
+    ...(options.requestDeadlineMs !== undefined
+      ? { requestDeadlineMs: options.requestDeadlineMs }
+      : {}),
   });
   void app.register(modelRoutes, { modelCatalogService });
   void app.register(usageRoutes, {

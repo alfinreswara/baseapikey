@@ -3,7 +3,10 @@
 ## Release flow
 
 1. Require the CI and CodeQL branch checks on `main`, protect the GitHub `release` environment with
-   reviewers, and confirm every item in `RELEASE_CHECKLIST.md` has evidence.
+   reviewers, and confirm every item in `RELEASE_CHECKLIST.md` has evidence. The check
+   **Prisma Migration Check** is required: it runs the billing integration tests of the credit
+   reservation against a real PostgreSQL, never against a mock. The tests fail when the database
+   is missing, so a green check always means the tests really ran.
 2. Run the **Build Release Images** workflow from `main` with a new semantic version and
    `publish=false`. Review both image vulnerability scans and the retained CycloneDX SBOMs.
 3. Re-run the same version with `publish=true` after approval. Record the published image digests,
@@ -124,8 +127,8 @@ the request: a request without a reservation never reaches a provider.
 - A request that failed after the provider was called keeps its reservation.
   The credit of a request that may still have been processed by the provider
   is only returned after the deadline of the reservation has passed. The
-  deadline is longer than the maximum lifetime of a request, it is never
-  derived from an arbitrary age.
+  deadline is the lease of the reservation, it is renewed while the request is
+  running and it is never derived from an arbitrary age.
 - A reservation of a process that stopped is recovered by the startup
   recovery and by the periodic recovery. A late settlement of a recovered
   reservation still charges the real cost, the unique constraint of the
@@ -133,6 +136,48 @@ the request: a request without a reservation never reaches a provider.
 - The idempotency key of a request identifies its reservation, its usage event
   and its ledger entry. A retry of the request, of the delivery queue or of
   the settlement never reserves, records or charges twice.
+
+### The lease of a reservation and the deadline of a request
+
+The deadline of a reservation is **not** a proof that the request stopped. The
+timeout of a provider bounds a single provider call, a request can call a
+fallback provider and every call can be retried, so the request can outlive
+the deadline of its reservation. The gateway therefore keeps two independent
+clocks:
+
+| Clock                        | Value      | Meaning                                                                                                                    |
+| ---------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `REQUEST_DEADLINE_MS`        | 300 000 ms | The deadline of the whole request. The provider call is aborted when it is reached, a request never runs without a bound.  |
+| The lease of the reservation | 120 000 ms | The deadline of the reservation. It is renewed every `RESERVATION_RENEWAL_INTERVAL_MS` (30 000 ms) while the request runs. |
+
+The two clocks answer different questions:
+
+- the lease answers **"may the credit be returned?"**. While the request runs,
+  the lease is renewed, so the periodic recovery never releases the credit of a
+  running request. The recovery checks the deadline again in the conditional
+  update, so a lease that was renewed between the read and the update wins the
+  race,
+- the deadline answers **"how long may the request run?"**. It bounds the
+  request, so a lease can not be renewed forever and the credit of a request
+  is never held forever.
+
+The lease ends with the request:
+
+- a request that ends normally is settled with its real cost,
+- a request that failed after the provider was called keeps its reservation.
+  The lease is not renewed any more, the credit is returned when the deadline
+  passes,
+- a process that dies does not renew the lease any more, the credit is
+  returned when the deadline passes. A reservation is never held forever.
+
+The renewal fails when the reservation is not reserved any more, for example
+because the recovery took it. The request is then stopped, a request that is
+served without a guaranteed credit can not be billed reliably. A renewal that
+fails because the database is unreachable is retried, the request keeps its
+credit as long as the lease is alive.
+
+`RESERVATION_RENEWAL_INTERVAL_MS` has to be shorter than the lease, the
+gateway rejects a configuration that breaks the guarantee.
 
 ### The recovery of the expired reservations
 

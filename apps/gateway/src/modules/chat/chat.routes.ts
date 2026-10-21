@@ -37,6 +37,8 @@ export interface ChatRoutesOptions extends FastifyPluginOptions {
   quotaService?: QuotaService;
   billingGuard?: IOrganizationBillingGuard;
   modelCatalogService?: ModelCatalogService;
+  /** The deadline of a request that reaches a provider. */
+  requestDeadlineMs?: number;
 }
 
 export async function chatRoutes(
@@ -71,6 +73,7 @@ export async function chatRoutes(
     chatService,
     options.modelPolicyResolver,
     options.creditAuthorization,
+    options.requestDeadlineMs,
   );
   const preHandler = [authMiddleware, permissionMiddleware];
   if (options.quotaService) {

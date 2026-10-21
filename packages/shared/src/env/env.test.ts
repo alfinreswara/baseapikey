@@ -162,6 +162,30 @@ if (stagingEnv.SHUTDOWN_DRAIN_DELAY_MS !== 10_000 || stagingEnv.SHUTDOWN_TIMEOUT
   throw new Error('Gateway shutdown defaults are invalid');
 }
 
+// The lease of a credit reservation has to be renewed before it ends,
+// otherwise the credit of a running request can be recovered while the
+// request is still working.
+if (
+  gatewayEnv.RESERVATION_RENEWAL_INTERVAL_MS !== 30_000 ||
+  gatewayEnv.REQUEST_DEADLINE_MS !== 300_000
+) {
+  throw new Error('The reservation lease defaults are invalid');
+}
+let longRenewalRejected = false;
+try {
+  parseGatewayEnv({
+    ...validGatewayInput,
+    RESERVATION_RENEWAL_INTERVAL_MS: '120000',
+  });
+} catch {
+  longRenewalRejected = true;
+}
+if (!longRenewalRejected) {
+  throw new Error(
+    'A renewal interval that is not shorter than the lease of the reservation must be rejected',
+  );
+}
+
 // The example values of the secret template must be rejected in staging, they
 // are public values that would allow a token forgery.
 for (const [name, value] of Object.entries({

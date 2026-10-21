@@ -40,6 +40,8 @@ export interface InferenceRoutesOptions extends FastifyPluginOptions {
   resilientRouter?: ResilientProviderRouter;
   billingGuard?: IOrganizationBillingGuard;
   modelCatalogService?: ModelCatalogService;
+  /** The deadline of a request that reaches a provider. */
+  requestDeadlineMs?: number;
 }
 
 export async function inferenceRoutes(
@@ -65,6 +67,7 @@ export async function inferenceRoutes(
       ),
     options.modelPolicyResolver,
     options.creditAuthorization,
+    options.requestDeadlineMs,
   );
   const guards = (permission: ApiKeyPermission): preHandlerHookHandler[] => {
     const handlers = [authenticate, requireApiKeyPermission(permission)];

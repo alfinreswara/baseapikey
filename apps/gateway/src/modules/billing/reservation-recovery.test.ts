@@ -32,6 +32,10 @@ class FakeReservationService implements IReservationService {
   async release(): Promise<boolean> {
     throw new Error('not used');
   }
+
+  async renew(): Promise<boolean> {
+    throw new Error('not used');
+  }
 }
 
 const silentLogger: ReservationRecoveryLogger = {
@@ -150,6 +154,9 @@ async function run(): Promise<void> {
         throw new Error('not used');
       },
       async release(): Promise<boolean> {
+        throw new Error('not used');
+      },
+      async renew(): Promise<boolean> {
         throw new Error('not used');
       },
     };

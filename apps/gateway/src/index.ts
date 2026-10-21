@@ -1,5 +1,5 @@
 import { prisma } from '@baseapikey/database';
-import { ProviderRegistry } from '@baseapikey/shared';
+import { ProviderRegistry, RESERVATION_LIFETIME_MS } from '@baseapikey/shared';
 import { parseGatewayEnv } from '@baseapikey/shared/env';
 import type { FastifyInstance } from 'fastify';
 import { createClient } from 'redis';
@@ -240,6 +240,11 @@ async function start(): Promise<void> {
       billingUsageGuard: new PrismaOrganizationBillingGuard(),
       lifecycle,
       reservationService,
+      requestDeadlineMs: env.REQUEST_DEADLINE_MS,
+      reservationLease: {
+        lifetimeMs: RESERVATION_LIFETIME_MS,
+        renewalIntervalMs: env.RESERVATION_RENEWAL_INTERVAL_MS,
+      },
       ...(env.METRICS_TOKEN ? { metricsToken: env.METRICS_TOKEN } : {}),
       ...(env.PROVIDER_ENCRYPTION_KEY
         ? { providerEncryptionKey: env.PROVIDER_ENCRYPTION_KEY }
