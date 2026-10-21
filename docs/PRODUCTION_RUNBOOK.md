@@ -27,22 +27,59 @@
 ### The protection of the release gate
 
 The protection of `main` and of the `release` environment lives in the GitHub settings of the
-repository, it can not be expressed in a file of the repository. The owner of the repository has to
-apply it once:
+repository. It is applied to the repository `alfinreswara/baseapikey` with the ruleset
+**main-protection** and with the branch protection of `main`. Both layers carry the same rules, so
+the stricter one decides.
 
-| Protection                                | Setting                                                          | Why                                                                                         |
-| ----------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Branch protection of `main`               | Settings → Branches → Add rule for `main`                        | A commit that reaches `main` without a green CI must not be possible.                       |
-| Required status checks                    | `CI Foundation Pipeline` (all jobs), `CodeQL Security Analysis`  | `main` only accepts a commit whose billing integration tests really ran against PostgreSQL. |
-| Require branches to be up to date         | enabled                                                          | The merge commit is tested, not only the head of the branch.                                |
-| Require a pull request                    | enabled, no direct pushes                                        | The review of the billing changes stays part of the history.                                |
-| Do not allow bypassing the above settings | enabled                                                          | Otherwise a maintainer can push straight into `main`.                                       |
-| Environment `release`                     | Required reviewers, at least one maintainer other than the actor | The `publish=true` dispatch waits for the approval of a second person.                      |
-| Environment `release`                     | Deployment branch: only `main`                                   | A release can not be built from an unprotected branch.                                      |
-| Environment `release`                     | Prevent self-review                                              | The approval of the publish is a second pair of eyes.                                       |
+| Protection                                 | Configuration                                                                                                               | State                          |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Required status checks                     | the 11 jobs of **CI Foundation Pipeline** and the job **Analyze JavaScript and TypeScript** of **CodeQL Security Analysis** | applied                        |
+| Require branches to be up to date          | enabled (`strict`)                                                                                                          | applied                        |
+| Require a pull request before merging      | enabled, no direct push into `main`                                                                                         | applied                        |
+| Force push                                 | not allowed                                                                                                                 | applied                        |
+| Deletion of the branch                     | not allowed                                                                                                                 | applied                        |
+| Linear history                             | required                                                                                                                    | applied                        |
+| Review conversations                       | all threads have to be resolved                                                                                             | applied                        |
+| Bypass by an administrator                 | not allowed, no bypass actor                                                                                                | applied                        |
+| Environment `release`: deployment branch   | only protected branches, so only `main`                                                                                     | applied                        |
+| Environment `release`: wait timer          | 5 minutes                                                                                                                   | applied                        |
+| Environment `release`: required reviewer   | the owner of the repository                                                                                                 | applied                        |
+| Environment `release`: prevent self-review | **not enabled**                                                                                                             | **action required**, see below |
+| Approving review of a pull request         | **not required**                                                                                                            | **action required**, see below |
 
-With these settings the release gate is: a green **Prisma Migration Check** on `main`, a reviewed
-pull request, a second approval for `publish=true`, and a digest in the overlay instead of a
+The twelve required checks are the names of the jobs, they are the names the workflows report:
+
+```
+Automated Tests                 Build Applications & Packages
+Dashboard Browser E2E           ESLint Code Quality
+Infrastructure Misconfiguration Scan   Kubernetes Manifest Validation
+Prettier Format Check           Prisma Migration Check
+Production Dependency Audit     Repository Secret Scan
+TypeScript Type Check           Analyze JavaScript and TypeScript
+```
+
+The **Prisma Migration Check** is the important one: it runs the billing integration tests of the
+credit reservation against a real PostgreSQL, never against a mock. The tests fail when the
+database is missing, and the job verifies that every suite reported its success, so a green check
+means the tests really ran.
+
+### What still needs a second maintainer
+
+The repository has exactly one collaborator with write access, the owner. Two protections can not
+be applied with a single identity, and both need a second maintainer:
+
+1. **An approving review of a pull request.** The count of the required approvals is `0`, so a pull
+   request is still mandatory, but nobody else can approve it. With a second maintainer the count
+   becomes `1` and the review of the billing, the database, the infrastructure, and the workflows
+   becomes a real second pair of eyes. `.github/CODEOWNERS` already names the areas that need it.
+2. **Prevent self-review in the `release` environment.** The environment has a required reviewer
+   and a wait timer, so every `publish=true` waits for a deliberate approval of a human. The
+   self-review is still allowed, because with the owner as the only reviewer the prohibition would
+   make the release impossible. With a second maintainer the prohibition can be enabled and the
+   approval of the publish is a genuine second pair of eyes.
+
+Until then the release gate is: a green **Prisma Migration Check** on `main`, a pull request that
+somebody merged, an explicit approval of the deployment, and a digest in the overlay instead of a
 mutable tag.
 
 The workflow never publishes on its own. `publish` defaults to `false`, the login to the container

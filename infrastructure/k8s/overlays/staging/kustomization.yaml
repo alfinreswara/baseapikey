@@ -13,9 +13,19 @@
 #   baseapikey-staging-secrets           Secret created from a secret manager
 #   baseapikey-staging-tls               TLS certificate for the staging hosts
 #
-# The images are pinned to the commit derived tag that the release workflow
-# publishes for the tested commit (`sha-<commit>`). The image has to be
-# published before the overlay can be applied.
+# The images are pinned to the release tag that the release workflow publishes
+# for the tested commit. The workflow publishes the release tag (`v0.1.0`) and
+# the commit derived tag (`sha-<commit>`) for the same image content, the
+# commit derived tag traces the exact commit the image was built from. The
+# image has to be published before the overlay can be applied, a tag that was
+# never published makes the rollout fail with ImagePullBackOff.
+#
+# The tag `v0.1.0` has never been published, the first publication is the one
+# of the merged main. A tag that was published before must never be reused for
+# different image content.
+#
+# The production overlay pins the digest of the image instead of the tag, so a
+# deployment can never change even if the tag is moved.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
