@@ -97,7 +97,7 @@ export class PrismaUsageBillingService implements IUsageBillingService {
           });
           const settled = await tx.billingReservation.updateMany({
             where: { id: data.reservationId, status: { in: ['RESERVED', 'EXPIRED'] } },
-            data: { status: 'SETTLED' },
+            data: { status: 'SETTLED', settledAmountMicros: costMicros },
           });
           if (settled.count > 0 && reservation?.status === 'RESERVED') {
             reservedMicros -= Number(reservation.amountMicros);
