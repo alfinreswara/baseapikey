@@ -1,5 +1,12 @@
 import { prisma } from '@baseapikey/database';
 
+/** The database rejected a duplicate, the unique constraint did its job. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002'
+  );
+}
+
 import type { CreateUsageRecordDto } from '../dto/usage.dto';
 
 export interface UsageRecordEntity {
@@ -29,6 +36,30 @@ export interface IUsageRepository {
 
 export class PrismaUsageRepository implements IUsageRepository {
   async createUsageRecord(data: CreateUsageRecordDto): Promise<UsageRecordEntity> {
+    try {
+      return await this.createUsageRecordOnce(data);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // The event was already recorded. A retry of the delivery queue
+        // returns the existing row, so the usage is neither duplicated nor
+        // charged twice.
+        const existing = await prisma.usage.findUnique({
+          where: {
+            apiKeyId_usageKey: {
+              apiKeyId: data.apiKeyId,
+              usageKey: data.usageKey,
+            },
+          },
+        });
+        if (existing) {
+          return { ...existing, estimatedCost: Number(existing.estimatedCost) };
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async createUsageRecordOnce(data: CreateUsageRecordDto): Promise<UsageRecordEntity> {
     const created = await prisma.$transaction(async (tx) => {
       const record = await tx.usage.create({
         data: {
@@ -39,6 +70,7 @@ export class PrismaUsageRepository implements IUsageRepository {
           model: data.model,
           endpoint: data.endpoint,
           requestId: data.requestId,
+          usageKey: data.usageKey,
           promptTokens: data.promptTokens,
           completionTokens: data.completionTokens,
           totalTokens: data.totalTokens,

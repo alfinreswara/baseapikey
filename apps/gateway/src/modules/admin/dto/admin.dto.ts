@@ -54,6 +54,11 @@ export const CreateModelSchema = z
     maxOutputTokens: z.number().int().positive().max(10_000_000),
     inputPricePerMillion: z.number().nonnegative().max(1_000_000),
     outputPricePerMillion: z.number().nonnegative().max(1_000_000),
+    /**
+     * A model without a price is rejected unless it is explicitly marked as
+     * free. The default is false, a model with a price is never free.
+     */
+    isFree: z.boolean().optional(),
     supportsStreaming: z.boolean().optional(),
     supportsVision: z.boolean().optional(),
     supportsFunctionCalling: z.boolean().optional(),

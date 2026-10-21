@@ -9,6 +9,12 @@ export const CreateUsageRecordSchema = z.object({
   endpoint: z.string().max(255),
   method: z.string().max(10).default('GET'),
   requestId: z.string().max(255),
+  /**
+   * Identifies the usage event over the retries of the delivery queue. The
+   * database rejects a second event with the same key, so a retry neither
+   * duplicates the usage row nor the charge.
+   */
+  usageKey: z.string().uuid(),
   promptTokens: z.number().int().nonnegative().default(0),
   completionTokens: z.number().int().nonnegative().default(0),
   totalTokens: z.number().int().nonnegative().default(0),

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { QuotaService } from '../../quota/services/quota.service';
@@ -69,6 +71,8 @@ export function registerUsageTrackingHook(
       endpoint: request.routeOptions.url ?? request.url.split('?')[0] ?? request.url,
       method: request.method,
       requestId: request.id,
+      // The key identifies the usage event over the retries of the queue.
+      usageKey: randomUUID(),
       promptTokens,
       completionTokens,
       totalTokens,

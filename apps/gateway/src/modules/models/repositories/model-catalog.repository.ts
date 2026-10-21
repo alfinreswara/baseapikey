@@ -9,6 +9,7 @@ export interface ModelCatalogRecord {
   maxOutputTokens: number;
   inputPricePerMillion: number;
   outputPricePerMillion: number;
+  isFree: boolean;
   supportsStreaming: boolean;
   supportsVision: boolean;
   supportsFunctionCalling: boolean;
@@ -54,6 +55,7 @@ export class PrismaModelCatalogRepository implements IModelCatalogRepository {
       maxOutputTokens: model.maxOutputTokens,
       inputPricePerMillion: model.inputPricePerMillion.toNumber(),
       outputPricePerMillion: model.outputPricePerMillion.toNumber(),
+      isFree: model.isFree,
       supportsStreaming: model.supportsStreaming,
       supportsVision: model.supportsVision,
       supportsFunctionCalling: model.supportsFunctionCalling,

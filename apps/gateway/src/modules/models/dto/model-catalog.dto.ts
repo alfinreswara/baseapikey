@@ -15,6 +15,8 @@ export const ModelCatalogItemSchema = z.object({
     input: z.number().nonnegative(),
     output: z.number().nonnegative(),
   }),
+  /** The model is explicitly configured as free by an administrator. */
+  is_free: z.boolean(),
   capabilities: z.object({
     streaming: z.boolean(),
     vision: z.boolean(),

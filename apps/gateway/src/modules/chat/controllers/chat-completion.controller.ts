@@ -1,16 +1,30 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+import {
+  estimateModelCostUsd,
+  type ModelPolicyResolver,
+} from '../../../modules/models/services/model-policy.service';
 import type { ChatCompletionChunkDTO } from '../dto/chat-completion.dto';
 import { validateChatCompletionRequest } from '../dto/chat-completion.dto';
 import type { ChatCompletionService } from '../services/chat-completion.service';
 
-export function createChatCompletionController(chatService: ChatCompletionService) {
+export function createChatCompletionController(
+  chatService: ChatCompletionService,
+  policyResolver: ModelPolicyResolver,
+) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const dto = validateChatCompletionRequest(request.body);
 
+    // The catalogue decides which provider serves the model and what it
+    // costs. A model that is unknown or without a trusted price is rejected
+    // before the request reaches a provider.
+    const policy = await policyResolver.resolve(dto.model, dto.provider);
+    dto.provider = policy.providerSlug;
+    dto.model = policy.modelId;
+
     request.usageMetadata = {
-      provider: dto.provider ?? '9router',
-      model: dto.model,
+      provider: policy.providerSlug,
+      model: policy.modelId,
     };
 
     const abortController = new AbortController();
@@ -36,6 +50,11 @@ export function createChatCompletionController(chatService: ChatCompletionServic
             promptTokens: responseDTO.usage.prompt_tokens,
             completionTokens: responseDTO.usage.completion_tokens,
             totalTokens: responseDTO.usage.total_tokens,
+            estimatedCost: estimateModelCostUsd(
+              policy,
+              responseDTO.usage.prompt_tokens,
+              responseDTO.usage.completion_tokens,
+            ),
           };
         }
         void reply.status(200).send(responseDTO);
@@ -78,6 +97,11 @@ export function createChatCompletionController(chatService: ChatCompletionServic
             promptTokens: chunk.usage.prompt_tokens,
             completionTokens: chunk.usage.completion_tokens,
             totalTokens: chunk.usage.total_tokens,
+            estimatedCost: estimateModelCostUsd(
+              policy,
+              chunk.usage.prompt_tokens,
+              chunk.usage.completion_tokens,
+            ),
           };
         }
         const canContinue = reply.raw.write(payload);

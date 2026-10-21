@@ -146,6 +146,7 @@ export class ModelCatalogService {
         input: record.inputPricePerMillion,
         output: record.outputPricePerMillion,
       },
+      is_free: record.isFree,
       capabilities: {
         streaming: record.supportsStreaming,
         vision: record.supportsVision,

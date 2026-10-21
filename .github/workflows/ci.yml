@@ -263,6 +263,11 @@ jobs:
       - name: Verify migration status
         run: pnpm --filter @baseapikey/database exec prisma migrate status --schema prisma/schema.prisma
 
+      - name: Run the billing concurrency tests
+        run: pnpm --filter @baseapikey/gateway test:concurrency
+        env:
+          DATABASE_URL: postgresql://baseapikey:baseapikey_ci_password@localhost:5432/baseapikey_ci?schema=public
+
   dependency-audit:
     name: Production Dependency Audit
     runs-on: ubuntu-24.04

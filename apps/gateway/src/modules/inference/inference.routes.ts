@@ -17,6 +17,7 @@ import {
   requireAvailableBilling,
 } from '../billing/middleware/billing-usage.middleware';
 import type { ModelCatalogService } from '../models/services/model-catalog.service';
+import type { ModelPolicyResolver } from '../models/services/model-policy.service';
 import type { ResilientProviderRouter } from '../providers/resilience/resilient-provider-router';
 import { requireQuota } from '../quota/middleware/quota.middleware';
 import type { QuotaService } from '../quota/services/quota.service';
@@ -26,6 +27,8 @@ import { InferenceService } from './services/inference.service';
 
 export interface InferenceRoutesOptions extends FastifyPluginOptions {
   providerRegistry: ProviderRegistry;
+  /** Resolves the model, the provider, and the price before the request. */
+  modelPolicyResolver?: ModelPolicyResolver;
   apiKeyRepository?: IApiKeyRepository;
   userRepository?: IUserRepository;
   quotaService?: QuotaService;
@@ -43,6 +46,9 @@ export async function inferenceRoutes(
   const apiKeyRepository = options.apiKeyRepository ?? new PrismaApiKeyRepository();
   const userRepository = options.userRepository ?? new PrismaUserRepository();
   const authenticate = authenticateApiKey(apiKeyRepository, userRepository);
+  if (!options.modelPolicyResolver) {
+    throw new Error('InferenceRoutes requires a modelPolicyResolver');
+  }
   const controller = new InferenceController(
     options.inferenceService ??
       new InferenceService(
@@ -51,6 +57,7 @@ export async function inferenceRoutes(
         options.resilientRouter,
         options.modelCatalogService,
       ),
+    options.modelPolicyResolver,
   );
   const guards = (permission: ApiKeyPermission): preHandlerHookHandler[] => {
     const handlers = [authenticate, requireApiKeyPermission(permission)];

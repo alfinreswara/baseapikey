@@ -74,6 +74,54 @@ in time and has to be investigated.
 The Dashboard uses the same sequence without the provider phase: it drains, answers new session
 requests with `503`, closes the HTTP server after the running requests, and exits.
 
+## Model catalogue and pricing
+
+The catalogue of the models is the only source of truth for the routing and the
+price of a request:
+
+- a model that is not in the catalogue is rejected with `MODEL_NOT_AVAILABLE`
+  before the request reaches a provider,
+- a model without a price is rejected with `MODEL_PRICING_NOT_CONFIGURED`,
+  unless an administrator marked it as free with the `isFree` flag of the
+  admin model API,
+- the provider of a request has to be the provider of the catalogue entry,
+  otherwise the request is rejected with `MODEL_PROVIDER_MISMATCH`. A client
+  can not route around the mapping and the accounting by sending another
+  provider,
+- the cost of a request is computed from the price of the catalogue and the
+  token counts of the provider response. A client never supplies a price.
+
+The catalogue is therefore part of the deployment: populate it before the
+traffic is accepted, otherwise every request is rejected. The models are
+managed with `POST /api/v1/admin/models`, the price of a model is
+`inputPricePerMillion` and `outputPricePerMillion`, and a model that is
+explicitly free carries `isFree: true`.
+
+## Credit balance and the spending limit
+
+The credit of an organization is deducted in one transaction, while the row of
+the billing account is locked:
+
+- the balance is decremented with a relative and conditional update, it can
+  never become negative and it can never overwrite the update of another
+  charge,
+- the spending limit is checked while the account is locked,
+- the ledger entry uses the id of the usage event as its idempotency key. The
+  unique constraint of the database rejects a second entry, so a retry of the
+  delivery queue never charges the balance twice,
+- a usage event that can not be charged stays visible as an unpaid usage
+  event, and the rejection is recorded in the audit trail with the action
+  `BILLING_CHARGE_REJECTED`.
+
+A request that needs a credit reservation before it is served is not
+implemented yet. The reservation would reserve the upper bound of the request
+(the price of the catalogue multiplied by the maximum number of the tokens of
+the request), settle it with the real cost once the provider reported the
+tokens, and release the unused part when the request failed or was
+cancelled. Until then the pre-request check is a fast fail, the charge is the
+authoritative one, and the requests that are served in the window between the
+check and the charge are visible as unpaid usage events.
+
 ## Database migration
 
 The migration job runs the Prisma CLI from the Gateway image with a read only root filesystem. That

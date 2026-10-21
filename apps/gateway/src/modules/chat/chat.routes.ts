@@ -14,6 +14,7 @@ import {
   requireAvailableBilling,
 } from '../billing/middleware/billing-usage.middleware';
 import type { ModelCatalogService } from '../models/services/model-catalog.service';
+import type { ModelPolicyResolver } from '../models/services/model-policy.service';
 import type { ResilientProviderRouter } from '../providers/resilience/resilient-provider-router';
 import { requireQuota } from '../quota/middleware/quota.middleware';
 import type { QuotaService } from '../quota/services/quota.service';
@@ -26,6 +27,8 @@ export interface ChatRoutesOptions extends FastifyPluginOptions {
   userRepository?: IUserRepository;
   providerRegistry?: ProviderRegistry;
   chatCompletionService?: ChatCompletionService;
+  /** Resolves the model, the provider, and the price before the request. */
+  modelPolicyResolver?: ModelPolicyResolver;
   /** Router that also carries the service wide abort signal. */
   resilientRouter?: ResilientProviderRouter;
   quotaService?: QuotaService;
@@ -55,7 +58,10 @@ export async function chatRoutes(
       options.modelCatalogService,
     );
 
-  const controller = createChatCompletionController(chatService);
+  if (!options.modelPolicyResolver) {
+    throw new Error('ChatRoutes requires a modelPolicyResolver');
+  }
+  const controller = createChatCompletionController(chatService, options.modelPolicyResolver);
   const preHandler = [authMiddleware, permissionMiddleware];
   if (options.quotaService) {
     preHandler.push(requireQuota(options.quotaService));

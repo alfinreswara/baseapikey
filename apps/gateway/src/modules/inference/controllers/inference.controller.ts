@@ -1,6 +1,10 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import {
+  type ModelCategory,
+  type ModelPolicyResolver,
+} from '../../models/services/model-policy.service';
+import {
   EmbeddingSchema,
   ImageGenerationSchema,
   parseInferenceDto,
@@ -11,11 +15,32 @@ import type { InferenceService } from '../services/inference.service';
 import { parseAudioMultipart } from '../utils/multipart.util';
 
 export class InferenceController {
-  constructor(private readonly service: InferenceService) {}
+  constructor(
+    private readonly service: InferenceService,
+    private readonly policyResolver: ModelPolicyResolver,
+  ) {}
+
+  /**
+   * Resolves the policy of the model before the request reaches a provider.
+   * The catalogue decides the provider and the price, a client can not route
+   * around the mapping and a model without a trusted price is rejected.
+   */
+  private async resolvePolicy(
+    model: string,
+    provider: string | undefined,
+    category: ModelCategory,
+  ) {
+    const policy = await this.policyResolver.resolve(model, provider);
+    this.policyResolver.assertCategory(policy, category);
+    return policy;
+  }
 
   async embedding(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dto = parseInferenceDto(EmbeddingSchema, request.body);
-    request.usageMetadata = { provider: dto.provider ?? '9router', model: dto.model };
+    const policy = await this.resolvePolicy(dto.model, dto.provider, 'EMBEDDING');
+    dto.provider = policy.providerSlug;
+    dto.model = policy.modelId;
+    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
     const result = await this.withAbort(reply, (signal) =>
       this.service.createEmbedding(dto, { signal }),
     );
@@ -29,10 +54,14 @@ export class InferenceController {
 
   async image(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dto = parseInferenceDto(ImageGenerationSchema, request.body);
-    request.usageMetadata = {
-      provider: dto.provider ?? '9router',
-      model: dto.model ?? 'default-image-model',
-    };
+    const policy = await this.resolvePolicy(
+      dto.model ?? 'default-image-model',
+      dto.provider,
+      'IMAGE',
+    );
+    dto.provider = policy.providerSlug;
+    dto.model = policy.modelId;
+    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
     const result = await this.withAbort(reply, (signal) =>
       this.service.createImage(dto, { signal }),
     );
@@ -41,7 +70,10 @@ export class InferenceController {
 
   async speech(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const dto = parseInferenceDto(SpeechSchema, request.body);
-    request.usageMetadata = { provider: dto.provider ?? '9router', model: dto.model };
+    const policy = await this.resolvePolicy(dto.model, dto.provider, 'AUDIO');
+    dto.provider = policy.providerSlug;
+    dto.model = policy.modelId;
+    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
     const result = await this.withAbort(reply, (signal) =>
       this.service.createSpeech(dto, { signal }),
     );
@@ -58,7 +90,10 @@ export class InferenceController {
     const contentType = request.headers['content-type'] ?? '';
     const multipart = parseAudioMultipart(request.body, contentType);
     const fields = parseInferenceDto(TranscriptionFieldsSchema, multipart.fields);
-    request.usageMetadata = { provider: fields.provider ?? '9router', model: fields.model };
+    const policy = await this.resolvePolicy(fields.model, fields.provider, 'AUDIO');
+    fields.provider = policy.providerSlug;
+    fields.model = policy.modelId;
+    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
     const result = await this.withAbort(reply, (signal) =>
       this.service.transcribeAudio(fields, multipart.file, { signal }),
     );

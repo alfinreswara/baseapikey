@@ -323,6 +323,9 @@ model Usage {
   model            String   @db.VarChar(100)
   endpoint         String   @db.VarChar(255)
   requestId        String   @map("request_id") @db.VarChar(255)
+  /// Stable over the retries of the delivery queue, it identifies the usage
+  /// event of a request.
+  usageKey         String   @map("usage_key") @db.Uuid
   promptTokens     Int      @default(0) @map("prompt_tokens")
   completionTokens Int      @default(0) @map("completion_tokens")
   totalTokens      Int      @default(0) @map("total_tokens")
@@ -344,6 +347,7 @@ model Usage {
   @@index([requestId])
   @@index([createdAt])
   @@index([organizationId, createdAt])
+  @@unique([apiKeyId, usageKey])
   @@map("usages")
 }
 
@@ -415,6 +419,10 @@ model AIModel {
   supportsJsonMode        Boolean       @default(false) @map("supports_json_mode")
   supportsReasoning       Boolean       @default(false) @map("supports_reasoning")
   isActive                Boolean       @default(true) @map("is_active")
+  /// The model is explicitly configured as free by an administrator. A model
+  /// without a price and without this flag is rejected, an unknown model is
+  /// never metered as a free model.
+  isFree                 Boolean       @default(false) @map("is_free")
   metadata                Json          @default("{}")
   createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
