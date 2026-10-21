@@ -88,7 +88,11 @@ const original = readFileSync(WORKFLOW, 'utf8');
 function validateVariant(name, mutate, expectedFragment) {
   check(name, () => {
     const broken = mutate(original);
-    const path = join(tmpdir(), `release-workflow-${Math.abs(hash(broken))}.yml`);
+    // The fixture lives in a directory of its own, the temporary directory of
+    // the system is world writable and a file in it can be replaced by a
+    // symlink of another user.
+    const dir = mkdtempSync(join(tmpdir(), 'release-fixture-'));
+    const path = join(dir, 'release.yml');
     writeFileSync(path, broken);
     try {
       const result = run(process.execPath, [VALIDATOR], {
@@ -101,17 +105,9 @@ function validateVariant(name, mutate, expectedFragment) {
         'the validation did not report the expected failure',
       );
     } finally {
-      rmSync(path, { force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
-}
-
-function hash(value) {
-  let result = 0;
-  for (const character of value) {
-    result = (result * 31 + character.charCodeAt(0)) | 0;
-  }
-  return result;
 }
 
 /** Extracts the block of a step, from its name line to the next step. */
