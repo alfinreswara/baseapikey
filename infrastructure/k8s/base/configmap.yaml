@@ -26,6 +26,9 @@ data:
   # above SHUTDOWN_TIMEOUT_MS so the process can exit before SIGKILL.
   SHUTDOWN_DRAIN_DELAY_MS: '10000'
   SHUTDOWN_TIMEOUT_MS: '30000'
+  # Interval of the recovery of the credit reservations whose request can no
+  # longer be running.
+  RESERVATION_RECOVERY_INTERVAL_MS: '60000'
   JWT_ACCESS_EXPIRES_IN: 15m
   JWT_REFRESH_EXPIRES_IN: 7d
   DASHBOARD_PORT: '3001'

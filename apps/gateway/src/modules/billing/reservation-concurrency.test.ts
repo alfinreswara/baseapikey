@@ -114,7 +114,11 @@ async function readState(fixtures: Fixtures) {
     where: { billingAccountId: account.id },
     orderBy: { createdAt: 'asc' },
   });
-  return { account, reservations, transactions };
+  const auditLogs = await prisma.auditLog.findMany({
+    where: { organizationId: fixtures.organizationId },
+    orderBy: { createdAt: 'asc' },
+  });
+  return { account, reservations, transactions, auditLogs };
 }
 
 async function run(): Promise<void> {
@@ -554,6 +558,131 @@ async function run(): Promise<void> {
       );
       assert.equal(Number(account.reservedMicros), 50_000);
       console.log('  ✅ The period change of the spending limit keeps the open reservations');
+    } finally {
+      await removeFixtures(fixtures);
+    }
+  }
+
+  // 11. The recovery of a reservation that a stopped process left behind. The
+  //     reservation is expired, the request can no longer be running, the
+  //     credit is returned exactly once.
+  {
+    const fixtures = await createFixtures(100);
+    try {
+      await reservationService.reserve({
+        organizationId: fixtures.organizationId,
+        apiKeyId: fixtures.apiKeyId,
+        requestId: `req-${randomUUID()}`,
+        idempotencyKey: randomUUID(),
+        modality: 'chat',
+        amountMicros: 100_000,
+        // The process stopped before the settlement, the deadline passed.
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+      const before = await readState(fixtures);
+      assert.equal(Number(before.account.reservedMicros), 100_000);
+
+      // The next instance of the gateway recovers the reservation.
+      const recovered = await reservationService.recoverExpiredReservations(
+        fixtures.organizationId,
+      );
+      assert.equal(recovered, 1);
+      const after = await readState(fixtures);
+      assert.equal(after.reservations[0]?.status, 'EXPIRED');
+      assert.equal(
+        Number(after.account.reservedMicros),
+        0,
+        'The held credit has to be returned exactly once',
+      );
+      assert.equal(after.account.creditBalanceCents, 100, 'The balance is not changed');
+      assert.equal(after.transactions.length, 0, 'A recovered reservation is not charged');
+      assert.equal(
+        after.auditLogs.filter((entry) => entry.action === 'BILLING_RESERVATION_EXPIRED').length,
+        1,
+        'The recovery has to be visible in the audit trail',
+      );
+
+      // A second recovery does not change anything again.
+      const recoveredAgain = await reservationService.recoverExpiredReservations(
+        fixtures.organizationId,
+      );
+      assert.equal(recoveredAgain, 0);
+      const afterAgain = await readState(fixtures);
+      assert.equal(Number(afterAgain.account.reservedMicros), 0);
+      assert.equal(afterAgain.account.creditBalanceCents, 100);
+      assert.equal(afterAgain.reservations[0]?.status, 'EXPIRED');
+      console.log('  ✅ A reservation of a stopped process is recovered exactly once');
+    } finally {
+      await removeFixtures(fixtures);
+    }
+  }
+
+  // 12. Two instances recover the same expired reservation at the same time,
+  //     the credit is returned once and the balance stays correct.
+  {
+    const fixtures = await createFixtures(100);
+    try {
+      await reservationService.reserve({
+        organizationId: fixtures.organizationId,
+        apiKeyId: fixtures.apiKeyId,
+        requestId: `req-${randomUUID()}`,
+        idempotencyKey: randomUUID(),
+        modality: 'chat',
+        amountMicros: 100_000,
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      const [first, second] = await Promise.all([
+        reservationService.recoverExpiredReservations(fixtures.organizationId),
+        reservationService.recoverExpiredReservations(fixtures.organizationId),
+      ]);
+      assert.equal(first + second, 1, 'Only one instance may return the credit');
+
+      const { account, reservations, transactions, auditLogs } = await readState(fixtures);
+      assert.equal(reservations[0]?.status, 'EXPIRED');
+      assert.equal(Number(account.reservedMicros), 0, 'The held credit must not be returned twice');
+      assert.equal(account.creditBalanceCents, 100);
+      assert.equal(transactions.length, 0);
+      assert.equal(
+        auditLogs.filter((entry) => entry.action === 'BILLING_RESERVATION_EXPIRED').length,
+        1,
+        'Only the winning instance may write the audit trail',
+      );
+      console.log('  ✅ Two instances recovering at the same time return the credit once');
+    } finally {
+      await removeFixtures(fixtures);
+    }
+  }
+
+  // 13. A reservation of a request that is still running is never released.
+  {
+    const fixtures = await createFixtures(100);
+    try {
+      await reservationService.reserve({
+        organizationId: fixtures.organizationId,
+        apiKeyId: fixtures.apiKeyId,
+        requestId: `req-${randomUUID()}`,
+        idempotencyKey: randomUUID(),
+        modality: 'chat',
+        amountMicros: 100_000,
+        // The request is still running, the deadline has not passed.
+        expiresAt: new Date(Date.now() + 120_000),
+      });
+
+      const recovered = await reservationService.recoverExpiredReservations(
+        fixtures.organizationId,
+      );
+      assert.equal(recovered, 0, 'A running request keeps its credit');
+      const { account, reservations, auditLogs } = await readState(fixtures);
+      assert.equal(reservations[0]?.status, 'RESERVED');
+      assert.equal(Number(account.reservedMicros), 100_000);
+      assert.equal(account.creditBalanceCents, 100);
+      assert.equal(
+        auditLogs.filter((entry) => entry.action === 'BILLING_RESERVATION_EXPIRED').length,
+        0,
+        'A running request must not be written into the audit trail of a recovery',
+      );
+      console.log('  ✅ A reservation of a running request is not released');
     } finally {
       await removeFixtures(fixtures);
     }

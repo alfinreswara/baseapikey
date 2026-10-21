@@ -31,6 +31,10 @@
       request for an unknown or unpriced model is rejected before the provider is called.
 - [ ] The billing concurrency tests pass against the staging database:
       `pnpm --filter @baseapikey/gateway test:concurrency`.
+- [ ] The credit reservation tests pass against the staging database:
+      `pnpm --filter @baseapikey/gateway test:reservation`.
+- [ ] The expired credit reservations of a stopped instance are recovered after a restart and
+      the instance stays unready until the recovery succeeded.
 - [ ] A client disconnect releases the upstream request, and an upstream failure is reported as
       an error response.
 - [ ] A cache outage keeps the instance alive, the readiness reports the cache as unavailable,

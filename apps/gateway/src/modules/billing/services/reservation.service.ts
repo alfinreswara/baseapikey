@@ -268,7 +268,13 @@ export class PrismaReservationService implements IReservationService {
           expiresAt: { lt: new Date() },
           ...(organizationId ? { organizationId } : {}),
         },
-        select: { id: true, billingAccountId: true, amountMicros: true, organizationId: true },
+        select: {
+          id: true,
+          billingAccountId: true,
+          amountMicros: true,
+          organizationId: true,
+          requestId: true,
+        },
       });
       if (expired.length === 0) {
         return 0;
@@ -294,6 +300,14 @@ export class PrismaReservationService implements IReservationService {
           where: { id: reservation.billingAccountId },
           data: { reservedMicros: { decrement: reservation.amountMicros } },
         });
+        // The recovery is recorded, the reason of the released credit is
+        // visible in the audit trail of the organization.
+        await this.writeAudit(
+          tx,
+          reservation,
+          'BILLING_RESERVATION_EXPIRED',
+          'The request can no longer be running',
+        );
         recovered += 1;
       }
       return recovered;

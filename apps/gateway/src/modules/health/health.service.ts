@@ -25,6 +25,7 @@ export interface ReadinessResponse {
   checks: {
     database: ReadinessCheckDetail;
     redis: ReadinessCheckDetail;
+    billing?: ReadinessCheckDetail;
   };
   timestamp: string;
 }
@@ -32,6 +33,12 @@ export interface ReadinessResponse {
 export interface ReadinessChecks {
   database(): Promise<void>;
   redis(): Promise<void>;
+  /**
+   * The credit reservations have to be recovered before the instance serves
+   * paid traffic. The check is optional, it is only configured when the
+   * gateway owns a billing account.
+   */
+  billing?(): Promise<void> | undefined;
 }
 
 const DEFAULT_READINESS_CHECKS: ReadinessChecks = {
@@ -106,12 +113,20 @@ export class HealthService {
       };
     }
 
-    const [dbCheck, redisCheck] = await Promise.all([
+    const [dbCheck, redisCheck, billingCheck] = await Promise.all([
       this.runReadinessCheck('Database', () => this.readinessChecks.database()),
       this.runReadinessCheck('Redis', () => this.readinessChecks.redis()),
+      this.readinessChecks.billing
+        ? this.runReadinessCheck('Billing', async () => {
+            await this.readinessChecks.billing!();
+          })
+        : Promise.resolve<ReadinessCheckDetail | undefined>(undefined),
     ]);
 
-    const isReady = dbCheck.status === 'ok' && redisCheck.status === 'ok';
+    const isReady =
+      dbCheck.status === 'ok' &&
+      redisCheck.status === 'ok' &&
+      (billingCheck === undefined || billingCheck.status === 'ok');
 
     return {
       status: isReady ? 'ok' : 'error',
@@ -119,6 +134,7 @@ export class HealthService {
       checks: {
         database: dbCheck,
         redis: redisCheck,
+        ...(billingCheck ? { billing: billingCheck } : {}),
       },
       timestamp: new Date().toISOString(),
     };

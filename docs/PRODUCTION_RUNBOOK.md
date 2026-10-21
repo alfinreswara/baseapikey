@@ -127,12 +127,38 @@ the request: a request without a reservation never reaches a provider.
   deadline is longer than the maximum lifetime of a request, it is never
   derived from an arbitrary age.
 - A reservation of a process that stopped is recovered by the startup
-  recovery and by the reservation of the next request. A late settlement of a
-  recovered reservation still charges the real cost, the unique constraint of
-  the ledger decides.
+  recovery and by the periodic recovery. A late settlement of a recovered
+  reservation still charges the real cost, the unique constraint of the
+  ledger decides.
 - The idempotency key of a request identifies its reservation, its usage event
   and its ledger entry. A retry of the request, of the delivery queue or of
   the settlement never reserves, records or charges twice.
+
+### The recovery of the expired reservations
+
+The gateway recovers the reservations whose request can no longer be running:
+
+- the recovery runs **before the server accepts a request**. The instance stays
+  unready until the recovery succeeded, so a paid request is never served with
+  a stale billing state. A failed recovery does not stop the instance, the
+  readiness stays false and the periodic recovery retries the work. The
+  balance itself is never wrong, a failed recovery only keeps the credit of the
+  affected organizations reserved, so the instance stays out of the rotation
+  instead of crashing,
+- the periodic recovery runs every `RESERVATION_RECOVERY_INTERVAL_MS` (60
+  seconds by default). The timer does not keep the process alive and it is
+  stopped with the other background work during the shutdown,
+- the recovery is safe with several instances. The transition of a reservation
+  is a conditional update, only the instance that changes the status returns
+  the held credit. The credit of a reservation is therefore never returned
+  twice and no settlement is duplicated,
+- only the reservations whose deadline has passed are recovered. The deadline
+  is derived from the maximum lifetime of a request, the credit of a request
+  that is still running is never released, not even when a new instance of the
+  gateway starts,
+- every recovered reservation is recorded in the audit trail of the
+  organization with the action `BILLING_RESERVATION_EXPIRED`, the reason of
+  the released credit stays visible.
 
 The unit of the reservation is the micro dollar, the same unit as the
 unbilled usage accumulator. One cent are ten thousand micros. The catalogue

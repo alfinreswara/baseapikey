@@ -10,6 +10,8 @@ import { RedisAccountTokenStore } from './modules/account/services/account-token
 import { PrismaApiKeyRepository } from './modules/api-keys/repositories/api-key.repository';
 import { RedisLoginRateLimiter } from './modules/auth/utils/redis-login-rate-limiter';
 import { PrismaOrganizationBillingGuard } from './modules/billing/middleware/billing-usage.middleware';
+import { ReservationRecoveryService } from './modules/billing/services/reservation-recovery.service';
+import { PrismaReservationService } from './modules/billing/services/reservation.service';
 import { HealthService } from './modules/health/health.service';
 import { ServiceLifecycle } from './modules/lifecycle/service-lifecycle';
 import { ShutdownCoordinator, scheduleProcessExit } from './modules/lifecycle/shutdown';
@@ -45,6 +47,15 @@ async function start(): Promise<void> {
   let usageWorker: RedisUsageWorker | undefined;
   const lifecycle = new ServiceLifecycle();
 
+  // The credit reservations of the requests that can no longer be running
+  // are recovered. The instance stays unready until the recovery succeeded, a
+  // paid request is never served with a stale billing state.
+  let billingStateReady = false;
+  const reservationService = new PrismaReservationService();
+  const reservationRecovery = new ReservationRecoveryService(reservationService, undefined, () => {
+    billingStateReady = true;
+  });
+
   // Kubernetes sends SIGTERM to PID 1 because the distroless runtime image
   // cannot run a shell based preStop hook. The coordinator owns the whole
   // termination sequence: it stops advertising readiness, rejects new
@@ -57,6 +68,9 @@ async function start(): Promise<void> {
         healthService?.markShuttingDown();
       },
       stopBackgroundWork: async () => {
+        // The recovery scheduler is stopped with the other background work, a
+        // running recovery is not interrupted, it settles or fails on its own.
+        reservationRecovery.stop();
         providerHealthMonitor?.stop();
         await usageWorker?.stop();
       },
@@ -112,6 +126,11 @@ async function start(): Promise<void> {
         async redis(): Promise<void> {
           if (!redisClient.isReady || (await redisClient.ping()) !== 'PONG') {
             throw new Error('Redis is not ready');
+          }
+        },
+        async billing(): Promise<void> {
+          if (!billingStateReady) {
+            throw new Error('The credit reservations have not been recovered yet');
           }
         },
       },
@@ -220,6 +239,7 @@ async function start(): Promise<void> {
       usageCostResolver: new PrismaUsageCostResolver(),
       billingUsageGuard: new PrismaOrganizationBillingGuard(),
       lifecycle,
+      reservationService,
       ...(env.METRICS_TOKEN ? { metricsToken: env.METRICS_TOKEN } : {}),
       ...(env.PROVIDER_ENCRYPTION_KEY
         ? { providerEncryptionKey: env.PROVIDER_ENCRYPTION_KEY }
@@ -229,6 +249,13 @@ async function start(): Promise<void> {
 
     process.once('SIGTERM', () => void handleShutdown('SIGTERM'));
     process.once('SIGINT', () => void handleShutdown('SIGINT'));
+
+    // The recovery of the expired reservations runs before the server accepts
+    // a request. A failure does not stop the instance, the readiness stays
+    // false and the periodic recovery retries the work.
+    const recovery = await reservationRecovery.runOnce();
+    billingStateReady = !recovery.failed;
+    reservationRecovery.start(env.RESERVATION_RECOVERY_INTERVAL_MS);
 
     const address = await app.listen({
       port: env.PORT,

@@ -84,6 +84,12 @@ export const GatewayEnvSchema = z
     CORS_ORIGIN: z.string().default('*'),
     MAX_REQUEST_SIZE: z.coerce.number().int().positive().default(1048576),
     SHUTDOWN_DRAIN_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(10_000),
+    RESERVATION_RECOVERY_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(3_600_000)
+      .default(60_000),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
     JWT_ACCESS_SECRET: z
       .string()

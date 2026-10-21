@@ -56,7 +56,10 @@ import {
 } from './modules/billing/repositories/billing.repository';
 import { BillingService } from './modules/billing/services/billing.service';
 import { CreditAuthorizationService } from './modules/billing/services/credit-authorization.service';
-import { PrismaReservationService } from './modules/billing/services/reservation.service';
+import {
+  PrismaReservationService,
+  type IReservationService,
+} from './modules/billing/services/reservation.service';
 import { chatRoutes } from './modules/chat/chat.routes';
 import { healthRoutes } from './modules/health/health.routes';
 import type { HealthService } from './modules/health/health.service';
@@ -144,6 +147,8 @@ export interface BuildAppOptions {
   lifecycle?: ServiceLifecycle;
   /** Resolves the model, the provider, and the price of a request. */
   modelPolicyResolver?: ModelPolicyResolver;
+  /** Reserves the credit of the requests and recovers the expired ones. */
+  reservationService?: IReservationService;
 }
 
 /** Routes that stay reachable while the instance drains. */
@@ -252,7 +257,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // are rejected instead of being served with an unknown price.
   // The credit of a request is reserved before it reaches a provider and
   // settled when the real usage is known.
-  const reservationService = new PrismaReservationService();
+  const reservationService = options.reservationService ?? new PrismaReservationService();
   const creditAuthorization = new CreditAuthorizationService(reservationService);
   const modelPolicyResolver: ModelPolicyResolver =
     options.modelPolicyResolver ??
