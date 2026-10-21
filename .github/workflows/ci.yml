@@ -108,6 +108,9 @@ jobs:
       - name: Run automated tests
         run: pnpm run test
 
+      - name: Test the load test stub
+        run: node loadtest/stub/stub-9router.test.mjs
+
   build:
     name: Build Applications & Packages
     runs-on: ubuntu-24.04

@@ -34,13 +34,21 @@ function check(name, passed, detail = '') {
 }
 
 function guardTarget() {
-  const parsed = new URL(BASE_URL);
+  guardHost('BASE_URL', BASE_URL);
+  // The control endpoint of the stub is written to with a POST. It is a
+  // local test double, the smoke test refuses to write to a host that looks
+  // like a production host.
+  guardHost('STUB_CONTROL', STUB_CONTROL);
+}
+
+function guardHost(name, target) {
+  const parsed = new URL(target);
   if (
     PRODUCTION_HOST_PATTERN.test(parsed.hostname) &&
     process.env['ALLOW_EXTERNAL_TARGET'] !== '1'
   ) {
     throw new Error(
-      `Refusing to test "${parsed.hostname}": it looks like a production host. ` +
+      `Refusing to use ${name} "${parsed.hostname}": it looks like a production host. ` +
         'Set ALLOW_EXTERNAL_TARGET=1 only for an explicitly approved target.',
     );
   }

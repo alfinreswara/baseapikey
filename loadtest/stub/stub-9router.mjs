@@ -13,13 +13,35 @@
 //   slow      the answer is delayed by STUB_DELAY_MS
 //   error     the upstream answers with HTTP 500
 //   hanging   the stream never ends, only the abort ends the request
+//
+// The stub is a local test double. It binds to the loopback interface only,
+// it never makes an outgoing request, and it never logs the body of a
+// request or a credential.
 import http from 'node:http';
 
-const PORT = Number(process.env['STUB_PORT'] ?? 55450);
+const DEFAULT_PORT = 55450;
+const MODES = Object.freeze(['ok', 'slow', 'error', 'hanging']);
+
+const parsedPort = Number(process.env['STUB_PORT'] ?? DEFAULT_PORT);
+const PORT =
+  Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort < 65_536 ? parsedPort : DEFAULT_PORT;
 const DELAY_MS = Number(process.env['STUB_DELAY_MS'] ?? 2000);
 
+/**
+ * The mode of the stub.
+ *
+ * Only the known modes are accepted. The control endpoint is reachable from
+ * the loopback interface, a value that is not one of the known modes would
+ * end up in the log of the stub and in the answers of the control endpoint.
+ */
+function isKnownMode(value) {
+  return typeof value === 'string' && MODES.includes(value);
+}
+
+const requestedMode = process.env['STUB_MODE'];
+
 const state = {
-  mode: process.env['STUB_MODE'] ?? 'ok',
+  mode: isKnownMode(requestedMode) ? requestedMode : 'ok',
   requests: 0,
   streams: 0,
   startedAt: Date.now(),
@@ -47,7 +69,15 @@ const server = http.createServer((request, response) => {
           return undefined;
         }
       })();
-      if (requested) state.mode = requested;
+      // Only a known mode is accepted. An unknown mode is refused, so a
+      // caller can not write an arbitrary value into the state of the stub.
+      if (!isKnownMode(requested)) {
+        sendJson(response, 400, {
+          error: { message: `unknown mode, use one of ${MODES.join(', ')}` },
+        });
+        return;
+      }
+      state.mode = requested;
       sendJson(response, 200, { mode: state.mode });
       return;
     }
@@ -192,6 +222,14 @@ function streamChat(response, payload) {
   sendNext();
 }
 
+// The stub binds to the loopback interface only. It is a local test double,
+// the control endpoint must not be reachable from another host.
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[stub-9router] listening on http://127.0.0.1:${PORT} (mode ${state.mode})`);
+  const address = server.address();
+  const bound = typeof address === 'object' && address !== null ? address.address : '127.0.0.1';
+  const boundPort = typeof address === 'object' && address !== null ? address.port : PORT;
+  // The line breaks are removed, a value of the request can not forge a log
+  // entry of the stub.
+  const mode = state.mode.replace(/\n|\r/g, '');
+  console.log(`[stub-9router] listening on http://${bound}:${boundPort} (mode ${mode})`);
 });
