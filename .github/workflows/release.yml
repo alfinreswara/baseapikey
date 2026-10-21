@@ -21,11 +21,23 @@ concurrency:
   group: release-${{ inputs.version }}
   cancel-in-progress: false
 
+env:
+  # The platforms of the release. The dry run builds and scans exactly these
+  # platforms, the result of the dry run therefore covers the architectures
+  # that the publication uses.
+  RELEASE_PLATFORMS: linux/amd64,linux/arm64
+  # The temporary tag of the image in the scan registry. It is never a release
+  # tag: the release tags are created from the digest of the scanned image
+  # after the security gate passed.
+  SCAN_TAG: scan-${{ github.sha }}
+
 jobs:
   images:
     name: ${{ matrix.service }} image
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The arm64 image is built with emulation, the job needs more than the
+    # default budget.
+    timeout-minutes: 90
     environment: release
     strategy:
       fail-fast: false
@@ -59,6 +71,39 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          # The local scan registry of the dry run is reachable under the host
+          # name of the runner.
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+
+      # The dry run scans the same way the release scans: the image is pushed
+      # to a registry and every platform of it is scanned there. The dry run
+      # uses a registry of the runner, it never writes to GitHub Container
+      # Registry and it never needs a registry credential.
+      - name: Start the local scan registry
+        if: ${{ !inputs.publish }}
+        run: |
+          docker run -d --name release-scan-registry -p 5000:5000 registry:2
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:5000/v2/ >/dev/null 2>&1; then
+              echo "The local scan registry is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The local scan registry did not become ready" >&2
+          exit 1
+
+      - name: Resolve the scan registry
+        run: |
+          if [ "${{ inputs.publish }}" = "true" ]; then
+            echo "SCAN_IMAGE=ghcr.io/${{ github.repository_owner }}/baseapikey-${{ matrix.service }}" >> "$GITHUB_ENV"
+          else
+            echo "SCAN_IMAGE=localhost:5000/baseapikey-${{ matrix.service }}" >> "$GITHUB_ENV"
+          fi
 
       - name: Log in to GitHub Container Registry
         if: inputs.publish
@@ -68,53 +113,95 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image metadata
-        id: metadata
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/baseapikey-${{ matrix.service }}
-          tags: |
-            type=raw,value=${{ inputs.version }}
-            type=sha,prefix=sha-
-
-      - name: Build release image
+      # The image is pushed to the scan tag, never to a release tag. The
+      # release tags are created from the digest of this image after the
+      # security gate passed.
+      - name: Build the image and push it to the scan registry
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          platforms: ${{ inputs.publish && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          push: ${{ inputs.publish }}
-          load: ${{ !inputs.publish }}
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          annotations: ${{ steps.metadata.outputs.annotations }}
+          platforms: ${{ env.RELEASE_PLATFORMS }}
+          push: true
           provenance: ${{ inputs.publish && 'mode=max' || 'false' }}
           sbom: ${{ inputs.publish }}
+          tags: ${{ env.SCAN_IMAGE }}:${{ env.SCAN_TAG }}
 
-      - name: Scan release image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      # The gate. Every platform that the release publishes is scanned, the
+      # scan covers the packages of the operating system and the libraries, and
+      # a finding of HIGH or CRITICAL fails the step and therefore the job.
+      # The release tags are created after these steps, a failed scan stops
+      # the publication.
+      - name: Scan linux/amd64
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
         with:
-          image-ref: ${{ fromJSON(steps.metadata.outputs.json).tags[0] }}
+          image-ref: ${{ env.SCAN_IMAGE }}:${{ env.SCAN_TAG }}
           format: table
           exit-code: '1'
           severity: HIGH,CRITICAL
           vuln-type: os,library
-          version: v0.74.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
+          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
 
-      - name: Generate CycloneDX SBOM
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - name: Scan linux/arm64
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
         with:
-          image-ref: ${{ fromJSON(steps.metadata.outputs.json).tags[0] }}
+          image-ref: ${{ env.SCAN_IMAGE }}:${{ env.SCAN_TAG }}
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+        env:
+          TRIVY_PLATFORM: linux/arm64
+          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
+          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
+
+      # The SBOM of every published platform. The report is generated from the
+      # scanned image, it describes the artifact that is published.
+      - name: Generate the SBOM of linux/amd64
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
+        with:
+          image-ref: ${{ env.SCAN_IMAGE }}:${{ env.SCAN_TAG }}
           format: cyclonedx
-          output: baseapikey-${{ matrix.service }}-${{ inputs.version }}.cdx.json
-          exit-code: '0'
-          version: v0.74.0
+          output: baseapikey-${{ matrix.service }}-${{ inputs.version }}-linux-amd64.cdx.json
+        env:
+          TRIVY_PLATFORM: linux/amd64
+          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
+          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
+
+      - name: Generate the SBOM of linux/arm64
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
+        with:
+          image-ref: ${{ env.SCAN_IMAGE }}:${{ env.SCAN_TAG }}
+          format: cyclonedx
+          output: baseapikey-${{ matrix.service }}-${{ inputs.version }}-linux-arm64.cdx.json
+        env:
+          TRIVY_PLATFORM: linux/arm64
+          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
+          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
 
       - name: Upload release SBOM
         uses: actions/upload-artifact@v7
         with:
           name: baseapikey-${{ matrix.service }}-${{ inputs.version }}-sbom
-          path: baseapikey-${{ matrix.service }}-${{ inputs.version }}.cdx.json
+          path: baseapikey-${{ matrix.service }}-${{ inputs.version }}-*.cdx.json
           if-no-files-found: error
           retention-days: 90
+
+      # The publication. The release tags are a carbon copy of the scanned
+      # image, the digest of the release tag is the digest of the image that
+      # was scanned. The scan tag is a temporary artifact of the gate, it is
+      # removed and it is never referenced by a deployment.
+      - name: Publish the release tags
+        if: inputs.publish
+        env:
+          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/baseapikey-${{ matrix.service }}
+          SCAN_IMAGE: ${{ env.SCAN_IMAGE }}
+          SCAN_TAG: ${{ env.SCAN_TAG }}
+          SCAN_DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: node scripts/publish-release-image.mjs

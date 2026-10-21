@@ -39,6 +39,12 @@
       renewed while the request runs, and `REQUEST_DEADLINE_MS` bounds the request.
 - [ ] The CI check **Prisma Migration Check** is green on `main`, it runs the billing integration
       tests against a real PostgreSQL.
+- [ ] The release pipeline tests pass: `pnpm run test:release`. They prove that the release tag is
+      created after the scan of every published platform.
+- [ ] The dry run of the release (`publish=false`) scanned `linux/amd64` and `linux/arm64`, and the
+      scan reported no finding of HIGH or CRITICAL.
+- [ ] The release run (`publish=true`) created the version tag and the commit tag from the digest of
+      the scanned image, and the scan tag `scan-<commit>` was removed.
 - [ ] A client disconnect releases the upstream request, and an upstream failure is reported as
       an error response.
 - [ ] A cache outage keeps the instance alive, the readiness reports the cache as unavailable,
