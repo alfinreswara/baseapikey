@@ -26,9 +26,9 @@ env:
   # platforms, the result of the dry run therefore covers the architectures
   # that the publication uses.
   RELEASE_PLATFORMS: linux/amd64,linux/arm64
-  # The temporary tag of the image in the scan registry. It is never a release
-  # tag: the release tags are created from the digest of the scanned image
-  # after the security gate passed.
+  # The tag of the image in the scan registry. It is never a release tag: the
+  # release tags are created from the digest of the scanned image after the
+  # security gate passed.
   SCAN_TAG: scan-${{ github.sha }}
 
 jobs:
@@ -47,6 +47,13 @@ jobs:
             dockerfile: infrastructure/docker/Dockerfile.gateway
           - service: dashboard
             dockerfile: infrastructure/docker/Dockerfile.dashboard
+    env:
+      # The image is built and scanned in a registry of the runner. The
+      # temporary artifact of the gate is never in a public registry, in the
+      # dry run and in the release.
+      SCAN_REGISTRY: localhost:5000
+      SCAN_IMAGE: localhost:5000/baseapikey-${{ matrix.service }}
+      RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/baseapikey-${{ matrix.service }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -72,50 +79,32 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
-          # The local scan registry of the dry run is reachable under the host
-          # name of the runner.
+          # The scan registry of the runner is reachable under the host name of
+          # the runner.
           driver-opts: network=host
           buildkitd-config-inline: |
             [registry."localhost:5000"]
               http = true
 
-      # The dry run scans the same way the release scans: the image is pushed
-      # to a registry and every platform of it is scanned there. The dry run
-      # uses a registry of the runner, it never writes to GitHub Container
-      # Registry and it never needs a registry credential.
-      - name: Start the local scan registry
-        if: ${{ !inputs.publish }}
+      # The scan registry of the runner. It holds the image while it is
+      # scanned, it is not reachable from another host, and it disappears with
+      # the runner. The image of the gate is never in a public registry.
+      - name: Start the scan registry
         run: |
           docker run -d --name release-scan-registry -p 5000:5000 registry:2
           for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:5000/v2/ >/dev/null 2>&1; then
-              echo "The local scan registry is ready"
+              echo "The scan registry is ready"
               exit 0
             fi
             sleep 2
           done
-          echo "The local scan registry did not become ready" >&2
+          echo "The scan registry did not become ready" >&2
           exit 1
 
-      - name: Resolve the scan registry
-        run: |
-          if [ "${{ inputs.publish }}" = "true" ]; then
-            echo "SCAN_IMAGE=ghcr.io/${{ github.repository_owner }}/baseapikey-${{ matrix.service }}" >> "$GITHUB_ENV"
-          else
-            echo "SCAN_IMAGE=localhost:5000/baseapikey-${{ matrix.service }}" >> "$GITHUB_ENV"
-          fi
-
-      - name: Log in to GitHub Container Registry
-        if: inputs.publish
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # The image is pushed to the scan tag, never to a release tag. The
-      # release tags are created from the digest of this image after the
-      # security gate passed.
+      # The image is pushed to the scan registry, never to a release tag and
+      # never to a public registry. The release tags are created from the
+      # digest of this image after the security gate passed.
       - name: Build the image and push it to the scan registry
         id: build
         uses: docker/build-push-action@v7
@@ -124,15 +113,17 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ env.RELEASE_PLATFORMS }}
           push: true
-          provenance: ${{ inputs.publish && 'mode=max' || 'false' }}
-          sbom: ${{ inputs.publish }}
+          # The attestations are inlined in the image, they are copied with it
+          # and they reach the published image unchanged.
+          provenance: mode=max
+          sbom: true
           tags: ${{ env.SCAN_IMAGE }}:${{ env.SCAN_TAG }}
 
       # The gate. Every platform that the release publishes is scanned, the
-      # scan covers the packages of the operating system and the libraries, and
-      # a finding of HIGH or CRITICAL fails the step and therefore the job.
-      # The release tags are created after these steps, a failed scan stops
-      # the publication.
+      # scan covers the packages of the operating system and the libraries,
+      # and a finding of HIGH or CRITICAL fails the step and therefore the
+      # job. The publication runs after these steps, a failed scan stops the
+      # publication.
       - name: Scan linux/amd64
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
         with:
@@ -143,8 +134,6 @@ jobs:
           vuln-type: os,library
         env:
           TRIVY_PLATFORM: linux/amd64
-          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
-          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
 
       - name: Scan linux/arm64
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
@@ -156,8 +145,6 @@ jobs:
           vuln-type: os,library
         env:
           TRIVY_PLATFORM: linux/arm64
-          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
-          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
 
       # The SBOM of every published platform. The report is generated from the
       # scanned image, it describes the artifact that is published.
@@ -169,8 +156,6 @@ jobs:
           output: baseapikey-${{ matrix.service }}-${{ inputs.version }}-linux-amd64.cdx.json
         env:
           TRIVY_PLATFORM: linux/amd64
-          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
-          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
 
       - name: Generate the SBOM of linux/arm64
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.74.0
@@ -180,8 +165,6 @@ jobs:
           output: baseapikey-${{ matrix.service }}-${{ inputs.version }}-linux-arm64.cdx.json
         env:
           TRIVY_PLATFORM: linux/arm64
-          TRIVY_USERNAME: ${{ inputs.publish && github.actor || '' }}
-          TRIVY_PASSWORD: ${{ inputs.publish && secrets.GITHUB_TOKEN || '' }}
 
       - name: Upload release SBOM
         uses: actions/upload-artifact@v7
@@ -191,17 +174,37 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      # The publication. The release tags are a carbon copy of the scanned
-      # image, the digest of the release tag is the digest of the image that
-      # was scanned. The scan tag is a temporary artifact of the gate, it is
-      # removed and it is never referenced by a deployment.
+      # The publication. The image of the scan registry is copied to GitHub
+      # Container Registry with the digest it has after the scan. The copy
+      # preserves the digest, the published image is the scanned image.
+      - name: Log in to GitHub Container Registry
+        if: inputs.publish
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish the release tags
         if: inputs.publish
         env:
-          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/baseapikey-${{ matrix.service }}
+          SCAN_REGISTRY: ${{ env.SCAN_REGISTRY }}
           SCAN_IMAGE: ${{ env.SCAN_IMAGE }}
           SCAN_TAG: ${{ env.SCAN_TAG }}
           SCAN_DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_IMAGE: ${{ env.RELEASE_IMAGE }}
           RELEASE_VERSION: ${{ inputs.version }}
           COMMIT_SHA: ${{ github.sha }}
         run: node scripts/publish-release-image.mjs
+
+      # The temporary artifact of the gate. The registry of the runner
+      # disappears with the runner, the container is removed explicitly so that
+      # the log of the run shows it.
+      - name: Remove the scan registry
+        if: always()
+        run: |
+          if docker ps -a --filter name=release-scan-registry --format '{{.Names}}' | grep -q release-scan-registry; then
+            docker rm -f release-scan-registry && echo "The scan registry was removed"
+          else
+            echo "The scan registry was already gone"
+          fi

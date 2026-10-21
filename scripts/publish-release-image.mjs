@@ -2,35 +2,46 @@
 /**
  * Publishes the release tags of an image that passed the security gate.
  *
- * The image was built and pushed to the scan registry under the scan tag. The
- * security gate scanned every platform of that image. The release tags are
- * created from the digest of the scanned image:
+ * The image was built and pushed to the scan registry of the runner and every
+ * platform of it was scanned there. The image never was in a public registry
+ * while it was scanned.
  *
- *   docker buildx imagetools create --tag <image>:<version> <image>@<digest>
+ * The release tags are created by copying the scanned image to GitHub
+ * Container Registry with the digest it has after the scan:
  *
- * When a single source is given, `imagetools create` performs a carbon copy:
- * the new tag points to exactly the manifests that were scanned, with the same
- * digests, the same labels, and the same provenance and SBOM attestations.
- * The release tag is never the result of a second build.
+ *   skopeo copy --all --preserve-digests \
+ *     docker://localhost:5000/<image>:<scan tag> docker://ghcr.io/<image>:<release tag>
  *
- * The scan tag is removed afterwards. It is never a release tag, the deployment
- * never refers to it, and the release tags keep the manifests alive.
+ * `--preserve-digests` forbids the conversion of the manifest, so the copied
+ * manifest is byte for byte the manifest that was scanned, with the same
+ * digests, the same labels, and the same inlined provenance and SBOM
+ * attestations. The copy is verified afterwards: the digest of the published
+ * manifest must be the digest that was scanned, otherwise the release fails.
+ *
+ * The temporary artifact of the gate is the scan registry of the runner. It
+ * disappears with the runner, and the workflow removes the container
+ * explicitly.
  *
  * The environment:
- *   RELEASE_IMAGE    the image of the release, for example ghcr.io/owner/baseapikey-gateway
- *   SCAN_IMAGE       the image in the scan registry, the same repository for a release
+ *   SCAN_REGISTRY    the registry of the runner, for example localhost:5000
+ *   SCAN_IMAGE       the image in the scan registry
  *   SCAN_TAG         the temporary tag of the scanned image
  *   SCAN_DIGEST      the digest of the scanned image, sha256:<hex>
+ *   RELEASE_IMAGE    the image of the release, for example ghcr.io/owner/baseapikey-gateway
  *   RELEASE_VERSION  the semantic version of the release, for example v1.2.3
  *   COMMIT_SHA       the commit the image was built from
  */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+
+import { isLocalRegistry } from './registry-reference.mjs';
 
 const REQUIRED = [
-  'RELEASE_IMAGE',
+  'SCAN_REGISTRY',
   'SCAN_IMAGE',
   'SCAN_TAG',
   'SCAN_DIGEST',
+  'RELEASE_IMAGE',
   'RELEASE_VERSION',
   'COMMIT_SHA',
 ];
@@ -42,7 +53,7 @@ function fail(message) {
 
 function run(command, args) {
   console.log(`[publish-release-image] ${command} ${args.join(' ')}`);
-  execFileSync(command, args, { stdio: 'inherit' });
+  return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
 const env = process.env;
@@ -52,10 +63,11 @@ for (const name of REQUIRED) {
   }
 }
 
-const releaseImage = env.RELEASE_IMAGE;
+const scanRegistry = env.SCAN_REGISTRY;
 const scanImage = env.SCAN_IMAGE;
 const scanTag = env.SCAN_TAG;
 const scanDigest = env.SCAN_DIGEST;
+const releaseImage = env.RELEASE_IMAGE;
 const version = env.RELEASE_VERSION;
 const commitSha = env.COMMIT_SHA;
 
@@ -69,33 +81,48 @@ if (!/^[0-9a-f]{40}$/.test(commitSha)) {
   fail(`the commit "${commitSha}" is not a commit sha`);
 }
 
-// The release tags are created from the digest of the scanned image. The
-// carbon copy keeps the manifests, the labels, and the attestations.
-const source = `${scanImage}@${scanDigest}`;
+// The source of the copy is the scan registry of the runner, over plain HTTP.
+// The destination is the registry of the release, the credentials of the
+// login of the workflow are used.
+const source = `docker://${scanImage}@${scanDigest}`;
+const insecure = isLocalRegistry(scanRegistry);
+
 for (const tag of [version, `sha-${commitSha}`]) {
+  const destination = `docker://${releaseImage}:${tag}`;
   try {
-    run('docker', ['buildx', 'imagetools', 'create', '--tag', `${releaseImage}:${tag}`, source]);
+    run('skopeo', [
+      'copy',
+      '--all',
+      '--preserve-digests',
+      ...(insecure ? ['--src-tls-verify=false'] : []),
+      source,
+      destination,
+    ]);
   } catch (error) {
     fail(
-      `the release tag ${releaseImage}:${tag} was not created: ${error.message}. ` +
-        'The scan tag stays, remove it with: ' +
-        `skopeo delete docker://${scanImage}:${scanTag}`,
+      `the release tag ${releaseImage}:${tag} was not published: ${error.message}. ` +
+        'The image stays in the scan registry of the runner, it is removed with the runner.',
     );
   }
-}
 
-// The scan tag is a temporary artifact of the gate. It is removed after the
-// release tags exist, the release tags keep the manifests alive.
-try {
-  run('skopeo', ['delete', `docker://${scanImage}:${scanTag}`]);
-} catch (error) {
-  // The release tags exist, a leftover scan tag is not a failure of the
-  // release. It is reported and removed by the operator.
-  console.warn(
-    `[publish-release-image] the scan tag ${scanImage}:${scanTag} could not be removed: ${error.message}`,
-  );
-  console.warn(
-    `[publish-release-image] remove it with: skopeo delete docker://${scanImage}:${scanTag}`,
+  // The published manifest must be the manifest that was scanned. The digest
+  // of a manifest is the digest of its bytes, the registry serves the bytes it
+  // stored.
+  let published;
+  try {
+    const raw = run('skopeo', ['inspect', '--raw', destination]);
+    published = `sha256:${createHash('sha256').update(raw, 'utf8').digest('hex')}`;
+  } catch (error) {
+    fail(`the published manifest of ${releaseImage}:${tag} could not be read: ${error.message}`);
+  }
+  if (published !== scanDigest) {
+    fail(
+      `the published digest of ${releaseImage}:${tag} is ${published} but the scanned ` +
+        `digest is ${scanDigest}. The release is not consistent with the scan.`,
+    );
+  }
+  console.log(
+    `[publish-release-image] ${releaseImage}:${tag} points to the scanned digest ${published}`,
   );
 }
 

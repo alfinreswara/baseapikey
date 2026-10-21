@@ -42,9 +42,11 @@
 - [ ] The release pipeline tests pass: `pnpm run test:release`. They prove that the release tag is
       created after the scan of every published platform.
 - [ ] The dry run of the release (`publish=false`) scanned `linux/amd64` and `linux/arm64`, and the
-      scan reported no finding of HIGH or CRITICAL.
-- [ ] The release run (`publish=true`) created the version tag and the commit tag from the digest of
-      the scanned image, and the scan tag `scan-<commit>` was removed.
+      scan reported no finding of HIGH or CRITICAL. The image of the gate stays in the scan registry
+      of the runner, nothing is written to GitHub Container Registry.
+- [ ] The release run (`publish=true`) copied the scanned image to GitHub Container Registry, the
+      version tag and the commit tag point to the digest that was scanned, and the scan registry of
+      the runner was removed.
 - [ ] A client disconnect releases the upstream request, and an upstream failure is reported as
       an error response.
 - [ ] A cache outage keeps the instance alive, the readiness reports the cache as unavailable,
