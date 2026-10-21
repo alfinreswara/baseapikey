@@ -291,6 +291,11 @@ jobs:
       - name: Verify migration status
         run: pnpm --filter @baseapikey/database exec prisma migrate status --schema prisma/schema.prisma
 
+      # The integration tests import the workspace packages, they resolve to
+      # the built output. Without the build the tests do not start at all.
+      - name: Build the workspace packages
+        run: pnpm exec turbo run build --filter=@baseapikey/gateway^...
+
       - name: Run the billing concurrency tests
         # The explicit bash shell enables pipefail. Without it the exit code
         # of the pipeline would be the one of tee, a failing test would look

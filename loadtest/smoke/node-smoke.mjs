@@ -11,7 +11,14 @@
 import http from 'node:http';
 
 const BASE_URL = process.env['BASE_URL'] ?? 'http://127.0.0.1:3310';
-const API_KEY = process.env['API_KEY'] ?? 'sk_live_stagingvalidationkey0000000000000000';
+// The key of the target. It is never part of the repository, the operator
+// exports it.
+const API_KEY = process.env['API_KEY'];
+if (!API_KEY) {
+  throw new Error(
+    'API_KEY is required. Export the API key of the target, it is never part of the repository.',
+  );
+}
 const MODEL = process.env['MODEL'] ?? 'demo-model';
 const METRICS_TOKEN =
   process.env['METRICS_TOKEN'] ?? 'staging-metrics-token-minimum-32-characters-long';
@@ -90,7 +97,7 @@ async function run() {
 
   const invalid = await request('/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: 'Bearer sk_live_invalidkeyinvalidkeyinvalidkey00' },
+    headers: { Authorization: 'Bearer sk_live_wrong000' },
     body: chatPayload(),
   });
   check(

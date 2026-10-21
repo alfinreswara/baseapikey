@@ -100,7 +100,8 @@ export function postChatWithInvalidKey() {
   const response = http.post(`${CONFIG.baseUrl}/v1/chat/completions`, chatPayload(), {
     headers: {
       'Content-Type': 'application/json',
-      Authorization: 'Bearer sk_live_invalidkeyinvalidkeyinvalidkey00',
+      // A well formed key that does not belong to the target.
+      Authorization: 'Bearer sk_live_wrong000',
     },
     tags: { name: 'chat-invalid-key' },
   });

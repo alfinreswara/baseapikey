@@ -33,6 +33,8 @@ loadtest/
 
 - The default target is the local sandbox `http://127.0.0.1:3310`. No script
   contains a host name.
+- The API key of the target is read from the environment. It is never part of
+  the repository, and the scripts refuse to start without it.
 - A target whose host looks like a production host is refused unless
   `ALLOW_EXTERNAL_TARGET=1` is set explicitly.
 - The scripts never create a paid transaction. The sandbox scenario refuses to

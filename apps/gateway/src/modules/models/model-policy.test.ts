@@ -18,7 +18,10 @@ import { ModelPolicyService } from './services/model-policy.service';
 import { MockModelCatalogCache } from './testing/mock-model-catalog.cache';
 import { MockModelCatalogRepository } from './testing/mock-model-catalog.repository';
 
-const API_KEY = 'sk_live_modelpolicyvalidationkey000000000';
+// The key of the test. The format of a key is `sk_live_` plus at least eight
+// characters of payload, the prefix of the key is the prefix plus the first
+// eight characters of the payload.
+const API_KEY = 'sk_live_testkey1';
 
 class CountingProvider implements IProviderAdapter {
   public calls = 0;

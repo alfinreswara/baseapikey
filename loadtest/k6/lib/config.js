@@ -4,9 +4,11 @@
 // contains a hard coded host. The defaults point at a local sandbox, and a
 // target that looks like production is refused unless the operator sets
 // ALLOW_EXTERNAL_TARGET=1 explicitly.
+//
+// The API key is never part of the repository. It is read from the
+// environment, the operator exports the key of the target.
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:3310';
-const DEFAULT_API_KEY = 'sk_live_stagingvalidationkey0000000000000000';
 const DEFAULT_MODEL = 'demo-model';
 
 /** Hosts that must never be used by an automated load test. */
@@ -15,6 +17,21 @@ const PRODUCTION_HOST_PATTERN = /(^|[.\-])prod([.\-]|$)|production/i;
 function readEnv(name, fallback) {
   const value = __ENV[name];
   return value === undefined || value === '' ? fallback : value;
+}
+
+/**
+ * The key of the target. The load test refuses to start without it, a key
+ * that is committed to the repository would leak into the history of the
+ * repository and into every clone of it.
+ */
+function requireApiKey() {
+  const apiKey = readEnv('API_KEY', '');
+  if (!apiKey) {
+    throw new Error(
+      'API_KEY is required. Export the API key of the target, it is never part of the repository.',
+    );
+  }
+  return apiKey;
 }
 
 /**
@@ -48,7 +65,7 @@ export function assertSafeTarget(baseUrl) {
 
 export const CONFIG = {
   baseUrl: assertSafeTarget(readEnv('BASE_URL', DEFAULT_BASE_URL)),
-  apiKey: readEnv('API_KEY', DEFAULT_API_KEY),
+  apiKey: requireApiKey(),
   model: readEnv('MODEL', DEFAULT_MODEL),
   /** The provider mode of the stub upstream: ok, slow, error, hanging. */
   stubMode: readEnv('STUB_MODE', 'ok'),
