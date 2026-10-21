@@ -234,10 +234,16 @@ async function runAuthenticationIntegrationTests(): Promise<void> {
       });
 
       // 3.1 Valid Access Token
+      const validTokenSession = await suite.sessionRepository.createSession({
+        userId: user.id,
+        refreshTokenHash: 'hash-validtoken',
+        expiresAt: new Date(Date.now() + 3600000),
+      });
       const validToken = suite.jwtService.generateAccessToken({
         userId: user.id,
         email: user.email,
         role: user.role,
+        sessionId: validTokenSession.id,
       });
 
       const validRes = await suite.app.inject({
@@ -508,10 +514,16 @@ async function runAuthenticationIntegrationTests(): Promise<void> {
         passwordHash: pwHash,
       });
 
+      const validTokenSession = await suite.sessionRepository.createSession({
+        userId: user.id,
+        refreshTokenHash: 'hash-validtoken',
+        expiresAt: new Date(Date.now() + 3600000),
+      });
       const validToken = suite.jwtService.generateAccessToken({
         userId: user.id,
         email: user.email,
         role: user.role,
+        sessionId: validTokenSession.id,
       });
 
       // 6.1 Protected Endpoint Success
@@ -582,16 +594,28 @@ async function runAuthenticationIntegrationTests(): Promise<void> {
         role: UserRole.ADMIN,
       });
 
+      const userTokenSession = await suite.sessionRepository.createSession({
+        userId: regularUser.id,
+        refreshTokenHash: 'hash-usertoken',
+        expiresAt: new Date(Date.now() + 3600000),
+      });
       const userToken = suite.jwtService.generateAccessToken({
         userId: regularUser.id,
         email: regularUser.email,
         role: regularUser.role,
+        sessionId: userTokenSession.id,
       });
 
+      const adminTokenSession = await suite.sessionRepository.createSession({
+        userId: adminUser.id,
+        refreshTokenHash: 'hash-admintoken',
+        expiresAt: new Date(Date.now() + 3600000),
+      });
       const adminToken = suite.jwtService.generateAccessToken({
         userId: adminUser.id,
         email: adminUser.email,
         role: adminUser.role,
+        sessionId: adminTokenSession.id,
       });
 
       // 7.1 USER accessing USER endpoint

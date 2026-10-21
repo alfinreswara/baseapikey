@@ -348,10 +348,20 @@ async function runSessionTests(): Promise<void> {
       expiresAt,
     });
 
+    // A token is only accepted when it is bound to a session, so the stranger
+    // gets a session of their own.
+    const strangerSess = await sessionRepository.createSession({
+      userId: stranger.id,
+      refreshTokenHash: 'stranger_hash',
+      deviceName: 'Stranger Device',
+      expiresAt,
+    });
+
     const strangerToken = jwtService.generateAccessToken({
       userId: stranger.id,
       email: stranger.email,
       role: stranger.role,
+      sessionId: strangerSess.id,
       tokenVersion: 1,
     });
 

@@ -11,10 +11,14 @@ const INSECURE_PRODUCTION_SECRETS = new Set([
 ]);
 
 function isInsecureProductionSecret(secret: string): boolean {
+  const normalized = secret.toLowerCase();
   return (
     secret.length < 32 ||
     INSECURE_PRODUCTION_SECRETS.has(secret) ||
-    secret.toLowerCase().includes('change_me')
+    normalized.includes('change_me') ||
+    normalized.includes('change-me') ||
+    normalized.includes('replace_with') ||
+    normalized.includes('replace-with')
   );
 }
 
@@ -141,7 +145,9 @@ export const GatewayEnvSchema = z
       });
     }
 
-    if (env.NODE_ENV !== 'production') {
+    // The hardening applies to every environment that can be reached from
+    // outside. The staging environment is not a development environment.
+    if (env.NODE_ENV !== 'production' && env.NODE_ENV !== 'staging') {
       return;
     }
 
@@ -171,7 +177,12 @@ export const GatewayEnvSchema = z
       });
     }
 
-    if (env.NINE_ROUTER_API_KEY.toLowerCase().includes('change_me')) {
+    if (
+      env.NINE_ROUTER_API_KEY.toLowerCase().includes('change_me') ||
+      env.NINE_ROUTER_API_KEY.toLowerCase().includes('change-me') ||
+      env.NINE_ROUTER_API_KEY.toLowerCase().includes('replace_with') ||
+      env.NINE_ROUTER_API_KEY.toLowerCase().includes('replace-with')
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['NINE_ROUTER_API_KEY'],
@@ -221,6 +232,18 @@ export const GatewayEnvSchema = z
       });
     }
 
+    if (
+      env.ERROR_REPORTING_WEBHOOK_SECRET &&
+      isInsecureProductionSecret(env.ERROR_REPORTING_WEBHOOK_SECRET)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ERROR_REPORTING_WEBHOOK_SECRET'],
+        message:
+          'ERROR_REPORTING_WEBHOOK_SECRET must be a unique production secret of at least 32 characters',
+      });
+    }
+
     if (!env.ACCOUNT_EMAIL_WEBHOOK_SECRET) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -230,6 +253,7 @@ export const GatewayEnvSchema = z
     } else if (
       isInsecureProductionSecret(env.ACCOUNT_EMAIL_WEBHOOK_SECRET) ||
       env.ACCOUNT_EMAIL_WEBHOOK_SECRET.toLowerCase().includes('replace_with') ||
+      env.ACCOUNT_EMAIL_WEBHOOK_SECRET.toLowerCase().includes('replace-with') ||
       env.ACCOUNT_EMAIL_WEBHOOK_SECRET === env.JWT_ACCESS_SECRET ||
       env.ACCOUNT_EMAIL_WEBHOOK_SECRET === env.JWT_REFRESH_SECRET
     ) {
@@ -262,7 +286,9 @@ export const GatewayEnvSchema = z
     if (
       !env.BILLING_PROVIDER_API_KEY ||
       env.BILLING_PROVIDER_API_KEY.toLowerCase().includes('replace_with') ||
-      env.BILLING_PROVIDER_API_KEY.toLowerCase().includes('change_me')
+      env.BILLING_PROVIDER_API_KEY.toLowerCase().includes('replace-with') ||
+      env.BILLING_PROVIDER_API_KEY.toLowerCase().includes('change_me') ||
+      env.BILLING_PROVIDER_API_KEY.toLowerCase().includes('change-me')
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -274,7 +300,8 @@ export const GatewayEnvSchema = z
     if (
       !env.BILLING_WEBHOOK_SECRET ||
       isInsecureProductionSecret(env.BILLING_WEBHOOK_SECRET) ||
-      env.BILLING_WEBHOOK_SECRET.toLowerCase().includes('replace_with')
+      env.BILLING_WEBHOOK_SECRET.toLowerCase().includes('replace_with') ||
+      env.BILLING_WEBHOOK_SECRET.toLowerCase().includes('replace-with')
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

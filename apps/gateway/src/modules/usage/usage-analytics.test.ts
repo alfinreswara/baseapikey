@@ -4,6 +4,7 @@ import { ValidationError } from '@baseapikey/shared';
 
 import { buildApp } from '../../app';
 import { loadAuthConfig } from '../auth/auth.config';
+import { InMemorySessionRepository } from '../auth/repositories/session.repository';
 import { JwtService } from '../auth/services/jwt.service';
 
 import {
@@ -147,13 +148,21 @@ async function runUsageAnalyticsTests(): Promise<void> {
 
   const repository = new MockUsageAnalyticsRepository();
   const jwtService = new JwtService(loadAuthConfig());
-  const app = buildApp({ usageAnalyticsRepository: repository, jwtService });
+  // An access token is only accepted when it is bound to a session.
+  const sessionRepository = new InMemorySessionRepository();
+  const session = await sessionRepository.createSession({
+    userId: USER_ID,
+    refreshTokenHash: 'hash-analytics',
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
+  const app = buildApp({ usageAnalyticsRepository: repository, jwtService, sessionRepository });
   await app.ready();
 
   const accessToken = jwtService.generateAccessToken({
     userId: USER_ID,
     email: 'analytics@example.com',
     role: 'USER',
+    sessionId: session.id,
   });
   const authHeaders = { authorization: `Bearer ${accessToken}` };
 
@@ -213,10 +222,16 @@ async function runUsageAnalyticsTests(): Promise<void> {
     assert.equal(attemptedUserOverride.statusCode, 400);
     assert.equal(repository.lastUserId, USER_ID);
 
+    const forbiddenSession = await sessionRepository.createSession({
+      userId: USER_ID,
+      refreshTokenHash: 'hash-analytics-guest',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
     const forbiddenToken = jwtService.generateAccessToken({
       userId: USER_ID,
       email: 'guest@example.com',
       role: 'GUEST',
+      sessionId: forbiddenSession.id,
     });
     const forbidden = await app.inject({
       method: 'GET',

@@ -5,9 +5,14 @@ import type { AuthConfig } from './types/auth.types';
 
 export function loadAuthConfig(env: Record<string, string | undefined> = process.env): AuthConfig {
   try {
-    const isProduction = env['NODE_ENV'] === 'production';
+    // The local defaults are only meant for a developer machine and for the
+    // tests. Every environment that can be reached from the outside, staging
+    // included, has to provide its own secrets.
+    const nodeEnv = env['NODE_ENV'];
+    const useLocalDefaults =
+      nodeEnv === undefined || nodeEnv === 'development' || nodeEnv === 'test';
     const mergedEnv = {
-      ...(!isProduction
+      ...(useLocalDefaults
         ? {
             DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/baseapikey',
             REDIS_URL: 'redis://localhost:6379',

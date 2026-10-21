@@ -133,4 +133,72 @@ if (ERROR_CODES.NOT_FOUND !== 'NOT_FOUND' || ROLES.ADMIN !== 'admin') {
   throw new Error('Constants validation failed');
 }
 
+// The hardening of the secrets has to apply to staging as well. A staging
+// environment is reachable from outside and must not start with the
+// documented example values.
+const stagingSecrets = {
+  JWT_ACCESS_SECRET: 'staging-access-secret-that-is-long-enough-32',
+  JWT_REFRESH_SECRET: 'staging-refresh-secret-that-is-long-enough-32',
+  METRICS_TOKEN: 'staging-metrics-token-that-is-long-enough-32',
+  ACCOUNT_EMAIL_WEBHOOK_URL: 'https://mailer.staging.example.com/events',
+  ACCOUNT_EMAIL_WEBHOOK_SECRET: 'staging-mailer-secret-long-enough-32-chars',
+  BILLING_PROVIDER_URL: 'https://payments.staging.example.com/api',
+  BILLING_PROVIDER_API_KEY: 'staging-payment-key',
+  BILLING_WEBHOOK_SECRET: 'staging-webhook-secret-long-enough-32-char',
+  ERROR_REPORTING_WEBHOOK_URL: 'https://errors.staging.example.com/events',
+  ERROR_REPORTING_WEBHOOK_SECRET: 'staging-error-secret-long-enough-32-chars',
+  PROVIDER_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+  DASHBOARD_PUBLIC_URL: 'https://console.staging.example.com',
+  GATEWAY_PUBLIC_URL: 'https://api.staging.example.com',
+  CORS_ORIGIN: 'https://console.staging.example.com',
+};
+
+const stagingEnv = parseGatewayEnv({
+  ...validGatewayInput,
+  ...stagingSecrets,
+  NODE_ENV: 'staging',
+});
+if (stagingEnv.SHUTDOWN_DRAIN_DELAY_MS !== 10_000 || stagingEnv.SHUTDOWN_TIMEOUT_MS !== 30_000) {
+  throw new Error('Gateway shutdown defaults are invalid');
+}
+
+// The example values of the secret template must be rejected in staging, they
+// are public values that would allow a token forgery.
+for (const [name, value] of Object.entries({
+  JWT_ACCESS_SECRET: 'replace-with-unique-random-secret-at-least-32-chars',
+  JWT_REFRESH_SECRET: 'replace-with-another-unique-random-secret-32-chars',
+  METRICS_TOKEN: 'replace-with-unique-random-secret-at-least-32-chars',
+  ACCOUNT_EMAIL_WEBHOOK_SECRET: 'replace-with-unique-random-secret-at-least-32-chars',
+  BILLING_WEBHOOK_SECRET: 'replace-with-unique-random-secret-at-least-32-chars',
+  BILLING_PROVIDER_API_KEY: 'replace-with-real-payment-key',
+  ERROR_REPORTING_WEBHOOK_SECRET: 'replace-with-unique-random-secret-at-least-32-chars',
+  NINE_ROUTER_API_KEY: 'replace-with-real-provider-key',
+})) {
+  let rejected = false;
+  try {
+    parseGatewayEnv({
+      ...validGatewayInput,
+      ...stagingSecrets,
+      NODE_ENV: 'staging',
+      [name]: value,
+    });
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) {
+    throw new Error(`The example value of ${name} must be rejected in staging`);
+  }
+}
+
+// The default secret of the schema must not be accepted in staging either.
+let defaultRejected = false;
+try {
+  parseGatewayEnv({ ...validGatewayInput, NODE_ENV: 'staging' });
+} catch {
+  defaultRejected = true;
+}
+if (!defaultRejected) {
+  throw new Error('The default JWT secret must be rejected in staging');
+}
+
 console.log('Shared package unit tests passed successfully.');

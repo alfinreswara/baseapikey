@@ -127,12 +127,13 @@ export class PrismaBillingRepository implements IBillingRepository {
     payload: Record<string, unknown>;
   }): Promise<{ applied: boolean; balanceAfterCents: number }> {
     return prisma.$transaction(async (tx) => {
-      const existing = await tx.billingWebhookEvent.findUnique({
+      // The event is looked up by its id only. The signature of the webhook
+      // does not cover the provider of the path, so a captured event could
+      // otherwise be replayed under another provider name and would credit
+      // the balance again.
+      const existing = await tx.billingWebhookEvent.findFirst({
         where: {
-          provider_providerEventId: {
-            provider: data.provider,
-            providerEventId: data.providerEventId,
-          },
+          providerEventId: data.providerEventId,
         },
       });
       if (existing?.processedAt) {
@@ -161,7 +162,10 @@ export class PrismaBillingRepository implements IBillingRepository {
           type: CreditTransactionType.PURCHASE,
           amountCents: data.amountCents,
           balanceAfterCents: account.creditBalanceCents,
-          idempotencyKey: `${data.provider}:${data.providerEventId}`,
+          // The idempotency key does not contain the provider of the path, so
+          // a replay under another provider name is rejected by the unique
+          // constraint instead of crediting the balance twice.
+          idempotencyKey: `webhook:${data.providerEventId}`,
           description: data.description ?? 'Credit purchase',
           metadata: { provider: data.provider, currency: data.currency },
         },
