@@ -41,11 +41,20 @@ the stricter one decides.
 | Linear history                             | required                                                                                                                    | applied                        |
 | Review conversations                       | all threads have to be resolved                                                                                             | applied                        |
 | Bypass by an administrator                 | not allowed, no bypass actor                                                                                                | applied                        |
+| Merge methods                              | squash and rebase, no merge commit                                                                                          | applied                        |
 | Environment `release`: deployment branch   | only protected branches, so only `main`                                                                                     | applied                        |
 | Environment `release`: wait timer          | 5 minutes                                                                                                                   | applied                        |
 | Environment `release`: required reviewer   | the owner of the repository                                                                                                 | applied                        |
 | Environment `release`: prevent self-review | **not enabled**                                                                                                             | **action required**, see below |
 | Approving review of a pull request         | **not required**                                                                                                            | **action required**, see below |
+
+The ruleset carries the rules `deletion`, `non_fast_forward`, `required_linear_history`,
+`required_status_checks`, and `pull_request`. It deliberately carries no "restrict updates" rule:
+with a single maintainer and no bypass actor that rule also blocks the merge of a pull request, the
+repository would be locked. The pull request requirement of the branch protection is the one that
+keeps `main` a pull request only branch, GitHub documents it as "collaborators can only push changes
+to a protected branch via a pull request". The branch restrictions of the ruleset are not available
+for a repository of a user, the API rejects them.
 
 The twelve required checks are the names of the jobs, they are the names the workflows report:
 
