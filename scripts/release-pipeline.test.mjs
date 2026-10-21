@@ -31,6 +31,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isLocalRegistry, isPublicRegistry, registryHost } from './registry-reference.mjs';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VALIDATOR = join(ROOT, 'scripts/validate-release-workflow.mjs');
 const PUBLISHER = join(ROOT, 'scripts/publish-release-image.mjs');
@@ -333,9 +335,32 @@ check('the publication refuses a malformed digest, version and commit', () => {
   }
 });
 
+// 6. The host of an image reference is parsed, never compared with a
+//    substring. A host that contains the name of a registry is not the
+//    registry.
+check('the host of an image reference is parsed and not matched as a substring', () => {
+  assert.equal(registryHost('ghcr.io/owner/baseapikey-gateway:scan-abc'), 'ghcr.io');
+  assert.equal(registryHost('ghcr.io/owner/baseapikey-gateway'), 'ghcr.io');
+  assert.equal(registryHost('localhost:5000/baseapikey-gateway:scan-abc'), 'localhost');
+  assert.equal(registryHost('127.0.0.1:5000/baseapikey-gateway'), '127.0.0.1');
+  assert.equal(
+    registryHost('notghcr.io.evil.example/owner/baseapikey-gateway:scan-abc'),
+    'notghcr.io.evil.example',
+  );
+  assert.equal(
+    registryHost('ghcr.io.evil.example/owner/baseapikey-gateway'),
+    'ghcr.io.evil.example',
+  );
+  assert.equal(isPublicRegistry('ghcr.io/owner/baseapikey-gateway:scan-abc'), true);
+  assert.equal(isPublicRegistry('notghcr.io.evil.example/owner/img'), false);
+  assert.equal(isPublicRegistry('ghcr.io.evil.example/owner/img'), false);
+  assert.equal(isPublicRegistry('localhost:5000/baseapikey-gateway'), false);
+  assert.equal(isLocalRegistry('localhost:5000/baseapikey-gateway'), true);
+  assert.equal(isLocalRegistry('ghcr.io/owner/baseapikey-gateway'), false);
+});
+
 if (failures > 0) {
   console.error(`\n❌ ${failures} release pipeline test(s) failed.`);
   process.exit(1);
 }
-
 console.log('🎉 All Release Pipeline Tests passed successfully!\n');

@@ -34,6 +34,8 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
+import { isLocalRegistry } from './registry-reference.mjs';
+
 const REQUIRED = [
   'SCAN_REGISTRY',
   'SCAN_IMAGE',
@@ -83,7 +85,7 @@ if (!/^[0-9a-f]{40}$/.test(commitSha)) {
 // The destination is the registry of the release, the credentials of the
 // login of the workflow are used.
 const source = `docker://${scanImage}@${scanDigest}`;
-const insecure = scanRegistry.startsWith('localhost') || scanRegistry.startsWith('127.0.0.1');
+const insecure = isLocalRegistry(scanRegistry);
 
 for (const tag of [version, `sha-${commitSha}`]) {
   const destination = `docker://${releaseImage}:${tag}`;

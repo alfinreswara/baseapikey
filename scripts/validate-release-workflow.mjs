@@ -29,6 +29,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isPublicRegistry } from './registry-reference.mjs';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // The tests point the validation at a fixture, the repository workflow is the
 // default.
@@ -125,11 +127,11 @@ const scanRegistry = jobEnv(text, 'SCAN_REGISTRY') ?? '';
 // The image of the gate is never in a public registry. It is built and
 // scanned in the registry of the runner, in the dry run and in the release.
 check(
-  scanImage.length > 0 && !scanImage.includes('ghcr.io'),
+  scanImage.length > 0 && !isPublicRegistry(scanImage),
   'the image of the gate must not live in a public registry',
 );
 check(
-  scanRegistry.length > 0 && !scanRegistry.includes('ghcr.io'),
+  scanRegistry.length > 0 && !isPublicRegistry(scanRegistry),
   'the scan registry of the gate must not be a public registry',
 );
 
@@ -156,7 +158,7 @@ if (build) {
     'the build step must push the image to the scan registry',
   );
   check(
-    !tags.includes('ghcr.io'),
+    !isPublicRegistry(tags),
     'the build step must not push the image to a public registry, the image of the gate is ' +
       'never public before the scan',
   );
@@ -186,7 +188,7 @@ for (const scan of scans) {
     `the scan step "${scan.name}" must read the image of the scan registry`,
   );
   check(
-    !imageRef.includes('ghcr.io'),
+    !isPublicRegistry(imageRef),
     `the scan step "${scan.name}" must not read the image from a public registry`,
   );
   check(
