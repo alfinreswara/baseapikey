@@ -292,12 +292,19 @@ jobs:
         run: pnpm --filter @baseapikey/database exec prisma migrate status --schema prisma/schema.prisma
 
       - name: Run the billing concurrency tests
+        # The explicit bash shell enables pipefail. Without it the exit code
+        # of the pipeline would be the one of tee, a failing test would look
+        # like a successful step.
+        shell: bash
         run: |
+          set -o pipefail
           pnpm --filter @baseapikey/gateway test:concurrency | tee "${RUNNER_TEMP}/concurrency.log"
           grep -q "All Billing Concurrency Tests passed successfully" "${RUNNER_TEMP}/concurrency.log"
 
       - name: Run the credit reservation tests
+        shell: bash
         run: |
+          set -o pipefail
           pnpm --filter @baseapikey/gateway test:reservation | tee "${RUNNER_TEMP}/reservation.log"
           grep -q "All Credit Reservation Concurrency Tests passed successfully" "${RUNNER_TEMP}/reservation.log"
           grep -q "All Credit Reservation Lifetime Tests passed successfully" "${RUNNER_TEMP}/reservation.log"

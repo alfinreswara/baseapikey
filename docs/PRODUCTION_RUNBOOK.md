@@ -24,6 +24,31 @@
    depth, provider health, and billing events.
 8. Keep the previous image digest available until the release has completed its observation window.
 
+### The protection of the release gate
+
+The protection of `main` and of the `release` environment lives in the GitHub settings of the
+repository, it can not be expressed in a file of the repository. The owner of the repository has to
+apply it once:
+
+| Protection                                | Setting                                                          | Why                                                                                         |
+| ----------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Branch protection of `main`               | Settings → Branches → Add rule for `main`                        | A commit that reaches `main` without a green CI must not be possible.                       |
+| Required status checks                    | `CI Foundation Pipeline` (all jobs), `CodeQL Security Analysis`  | `main` only accepts a commit whose billing integration tests really ran against PostgreSQL. |
+| Require branches to be up to date         | enabled                                                          | The merge commit is tested, not only the head of the branch.                                |
+| Require a pull request                    | enabled, no direct pushes                                        | The review of the billing changes stays part of the history.                                |
+| Do not allow bypassing the above settings | enabled                                                          | Otherwise a maintainer can push straight into `main`.                                       |
+| Environment `release`                     | Required reviewers, at least one maintainer other than the actor | The `publish=true` dispatch waits for the approval of a second person.                      |
+| Environment `release`                     | Deployment branch: only `main`                                   | A release can not be built from an unprotected branch.                                      |
+| Environment `release`                     | Prevent self-review                                              | The approval of the publish is a second pair of eyes.                                       |
+
+With these settings the release gate is: a green **Prisma Migration Check** on `main`, a reviewed
+pull request, a second approval for `publish=true`, and a digest in the overlay instead of a
+mutable tag.
+
+The workflow never publishes on its own. `publish` defaults to `false`, the login to the container
+registry only happens with `publish=true`, and the concurrency group of a version prevents two
+publishes of the same version at the same time.
+
 The workflow only builds and optionally publishes images; it deliberately does not deploy to a
 cluster. Cluster credentials, namespaces, domains, and promotion policy must be supplied by the
 operator. Never publish a version that was already used for different image content.
@@ -178,6 +203,20 @@ credit as long as the lease is alive.
 
 `RESERVATION_RENEWAL_INTERVAL_MS` has to be shorter than the lease, the
 gateway rejects a configuration that breaks the guarantee.
+
+The deadline has to cover the worst case of the provider configuration:
+
+```
+worst case = Σ over the active providers of ((maxRetries + 1) × timeoutMs) + backoff
+```
+
+The seeded configuration has one provider with `timeoutMs` 60000 and
+`maxRetries` 2, so the worst case is `3 × 60 s ≈ 180 s` and the deadline of
+300 s leaves a margin of about two provider timeouts. A second active provider
+raises the worst case to `6 × 60 s ≈ 360 s` and the deadline would cut the
+request during the fallback. Register a second provider only together with a
+larger `REQUEST_DEADLINE_MS` or a smaller `timeoutMs`, and review the value
+before the change reaches production.
 
 ### The recovery of the expired reservations
 
