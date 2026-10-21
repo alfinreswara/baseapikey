@@ -29,6 +29,12 @@ export class UsageTrackingService {
         estimatedCostUsd: record.estimatedCost,
         model: record.model,
         requestId: record.requestId,
+        // The settlement of the reservation and the charge happen in the same
+        // transaction.
+        reservationId: dto.reservationId ?? null,
+        // A request that failed may still have been processed by the
+        // provider, its credit stays reserved until the deadline has passed.
+        usageKnown: dto.statusCode < 500,
       });
     }
 

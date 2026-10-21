@@ -71,6 +71,9 @@ export class ApiKeyService {
       name: dto.name,
       keyHash,
       keyPrefix,
+      // The requested scope is honoured, so a client that asks for a narrower
+      // set of permissions does not silently receive the default scope.
+      ...(dto.permissions ? { permissions: dto.permissions } : {}),
       expiresAt: expiresAtDate,
       organizationId,
     });

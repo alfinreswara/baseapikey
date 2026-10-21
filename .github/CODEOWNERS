@@ -1,0 +1,13 @@
+# Code owners of the areas that need a second pair of eyes.
+#
+# The identity is the owner of the repository. It is the only identity the
+# repository can prove, it is verified through the collaborators API. A second
+# maintainer has to be invited, the release section of
+# docs/PRODUCTION_RUNBOOK.md describes what changes with a second reviewer:
+# the environment of the release can forbid a self review, and the review of
+# a pull request can require an approval of somebody else.
+
+/apps/gateway/src/modules/billing/ @alfinreswara
+/packages/database/ @alfinreswara
+/infrastructure/k8s/ @alfinreswara
+/.github/workflows/ @alfinreswara

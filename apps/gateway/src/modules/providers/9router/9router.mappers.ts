@@ -116,6 +116,10 @@ export function mapFromNineRouterStreamChunk(
   wire: NineRouterWireStreamChunk,
   providerSlug = '9router',
 ): ProviderStreamChunk {
+  const promptTokens = wire.usage?.prompt_tokens ?? 0;
+  const completionTokens = wire.usage?.completion_tokens ?? 0;
+  const totalTokens = wire.usage?.total_tokens ?? promptTokens + completionTokens;
+
   return {
     id: wire.id,
     object: 'chat.completion.chunk',
@@ -130,6 +134,17 @@ export function mapFromNineRouterStreamChunk(
       },
       finish_reason: parseFinishReason(c.finish_reason),
     })),
+    // The usage of a stream arrives with the last chunk. Without it the
+    // streamed tokens are not metered and the credits are not deducted.
+    ...(wire.usage
+      ? {
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens,
+          },
+        }
+      : {}),
   };
 }
 

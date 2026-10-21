@@ -44,6 +44,11 @@ as the production Secret, filled with staging values:
 `DASHBOARD_PUBLIC_URL` and `GATEWAY_PUBLIC_URL` have to point at the staging
 hosts, and `CORS_ORIGIN` has to allow the staging Dashboard origin only.
 
+The staging environment applies the same secret rules as production: the
+Gateway refuses to start when a secret is missing, shorter than 32 characters,
+or one of the documented example values. The public URLs have to use HTTPS and
+the secrets have to be different from each other.
+
 ## Image
 
 The overlay pins the release candidate `v0.1.0`. The release workflow

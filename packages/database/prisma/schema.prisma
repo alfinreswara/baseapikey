@@ -181,6 +181,7 @@ model Organization {
   billingAccount    BillingAccount?
   invitations       OrganizationInvitation[]
   usageDailyAggregates UsageDailyAggregate[]
+  reservations         BillingReservation[]
 
   @@index([ownerId])
   @@index([isActive, deletedAt])
@@ -283,6 +284,7 @@ model ApiKey {
   usages       Usage[]
   quota        ApiKeyQuota?
   auditLogs    AuditLog[]
+  reservations BillingReservation[]
 
   @@index([userId, status])
   @@index([keyPrefix, status])
@@ -323,6 +325,9 @@ model Usage {
   model            String   @db.VarChar(100)
   endpoint         String   @db.VarChar(255)
   requestId        String   @map("request_id") @db.VarChar(255)
+  /// Stable over the retries of the delivery queue, it identifies the usage
+  /// event of a request.
+  usageKey         String   @map("usage_key") @db.Uuid
   promptTokens     Int      @default(0) @map("prompt_tokens")
   completionTokens Int      @default(0) @map("completion_tokens")
   totalTokens      Int      @default(0) @map("total_tokens")
@@ -344,7 +349,39 @@ model Usage {
   @@index([requestId])
   @@index([createdAt])
   @@index([organizationId, createdAt])
+  @@unique([apiKeyId, usageKey])
   @@map("usages")
+}
+
+/// The credit that is held for a request while it is running.
+model BillingReservation {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  billingAccountId   String   @map("billing_account_id") @db.Uuid
+  apiKeyId           String?  @map("api_key_id") @db.Uuid
+  requestId          String   @map("request_id") @db.VarChar(255)
+  /// Identifies the request, a retry never creates a second reservation.
+  idempotencyKey     String   @unique @map("idempotency_key") @db.VarChar(255)
+  modality           String   @db.VarChar(32)
+  /// The reserved amount in micros.
+  amountMicros       BigInt   @map("amount_micros")
+  settledAmountMicros Int     @default(0) @map("settled_amount_micros")
+  /// RESERVED, SETTLED, RELEASED or EXPIRED.
+  status             String   @default("RESERVED") @db.VarChar(20)
+  /// The point in time at which the request can no longer be running. The
+  /// reservation is only recovered after that point, never by its age alone.
+  expiresAt          DateTime @map("expires_at") @db.Timestamptz()
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  apiKey         ApiKey?        @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([status, expiresAt])
+  @@index([billingAccountId, status])
+  @@map("billing_reservations")
 }
 
 model UsageDailyAggregate {
@@ -415,6 +452,17 @@ model AIModel {
   supportsJsonMode        Boolean       @default(false) @map("supports_json_mode")
   supportsReasoning       Boolean       @default(false) @map("supports_reasoning")
   isActive                Boolean       @default(true) @map("is_active")
+  /// The model is explicitly configured as free by an administrator. A model
+  /// without a price and without this flag is rejected, an unknown model is
+  /// never metered as a free model.
+  isFree                 Boolean       @default(false) @map("is_free")
+  /// The price of one generated image, a null value means that the modality
+  /// has no verifiable price.
+  pricePerImage          Decimal?      @map("price_per_image") @db.Decimal(12, 6)
+  /// The price of one character of synthesized speech.
+  pricePerCharacter      Decimal?      @map("price_per_character") @db.Decimal(12, 6)
+  /// The price of one megabyte of transcribed audio.
+  pricePerMegabyte       Decimal?      @map("price_per_megabyte") @db.Decimal(12, 6)
   metadata                Json          @default("{}")
   createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
@@ -462,6 +510,9 @@ model BillingAccount {
   currency           String               @default("USD") @db.VarChar(3)
   creditBalanceCents Int                  @default(0) @map("credit_balance_cents")
   unbilledUsageMicros Int                 @default(0) @map("unbilled_usage_micros")
+  /// The sum of the open reservations, the credit that is held for the
+  /// requests that are running.
+  reservedMicros      BigInt               @default(0) @map("reserved_micros")
   externalCustomerId String?              @unique @map("external_customer_id") @db.VarChar(255)
   currentPeriodStart DateTime             @default(now()) @map("current_period_start") @db.Timestamptz()
   currentPeriodEnd   DateTime?            @map("current_period_end") @db.Timestamptz()
@@ -471,6 +522,7 @@ model BillingAccount {
   organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   invoices     BillingInvoice[]
   transactions CreditTransaction[]
+  reservations BillingReservation[]
 
   @@index([status])
   @@map("billing_accounts")
@@ -505,6 +557,9 @@ model CreditTransaction {
   billingAccountId  String                @map("billing_account_id") @db.Uuid
   type              CreditTransactionType
   amountCents       Int                   @map("amount_cents")
+  /// The exact cost of the entry in micros, the amount in cents is rounded
+  /// down and the rest stays in the unbilled accumulator.
+  costMicros        Int                   @default(0) @map("cost_micros")
   balanceAfterCents Int                   @map("balance_after_cents")
   idempotencyKey    String                @unique @map("idempotency_key") @db.VarChar(255)
   description       String?               @db.Text

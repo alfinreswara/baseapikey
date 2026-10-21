@@ -6,16 +6,14 @@ import { buildApp } from '../../app';
 
 import {
   MODEL_CATALOG_CACHE_KEY,
-  type IModelCatalogCache,
   RedisModelCatalogCache,
   type RedisModelCatalogClient,
 } from './cache/model-catalog.cache';
 import type { ModelCatalogItemDto } from './dto/model-catalog.dto';
-import type {
-  IModelCatalogRepository,
-  ModelCatalogRecord,
-} from './repositories/model-catalog.repository';
+import type { ModelCatalogRecord } from './repositories/model-catalog.repository';
 import { ModelCatalogService } from './services/model-catalog.service';
+import { MockModelCatalogCache } from './testing/mock-model-catalog.cache';
+import { MockModelCatalogRepository } from './testing/mock-model-catalog.repository';
 
 const MODEL_CREATED_AT = new Date('2026-01-02T03:04:05.000Z');
 
@@ -29,6 +27,10 @@ function createModel(overrides: Partial<ModelCatalogRecord> = {}): ModelCatalogR
     maxOutputTokens: 8_192,
     inputPricePerMillion: 0.15,
     outputPricePerMillion: 0.6,
+    isFree: false,
+    pricePerImage: null,
+    pricePerCharacter: null,
+    pricePerMegabyte: null,
     supportsStreaming: true,
     supportsVision: true,
     supportsFunctionCalling: true,
@@ -42,45 +44,6 @@ function createModel(overrides: Partial<ModelCatalogRecord> = {}): ModelCatalogR
     },
     ...overrides,
   };
-}
-
-class MockModelCatalogRepository implements IModelCatalogRepository {
-  calls = 0;
-
-  constructor(public models: ModelCatalogRecord[]) {}
-
-  async findActiveModels(): Promise<ModelCatalogRecord[]> {
-    this.calls += 1;
-    return this.models;
-  }
-}
-
-class MockModelCatalogCache implements IModelCatalogCache {
-  value: ModelCatalogItemDto[] | null = null;
-  getCalls = 0;
-  setCalls = 0;
-  invalidateCalls = 0;
-  lastTtl: number | null = null;
-  failReads = false;
-  failWrites = false;
-
-  async get(): Promise<ModelCatalogItemDto[] | null> {
-    this.getCalls += 1;
-    if (this.failReads) throw new Error('Redis read failed');
-    return this.value;
-  }
-
-  async set(models: ModelCatalogItemDto[], ttlSeconds: number): Promise<void> {
-    this.setCalls += 1;
-    if (this.failWrites) throw new Error('Redis write failed');
-    this.value = models;
-    this.lastTtl = ttlSeconds;
-  }
-
-  async invalidate(): Promise<void> {
-    this.invalidateCalls += 1;
-    this.value = null;
-  }
 }
 
 class MockRedisClient implements RedisModelCatalogClient {
@@ -133,6 +96,10 @@ async function runModelCatalogTests(): Promise<void> {
       input: 0.15,
       output: 0.6,
     },
+    is_free: false,
+    price_per_image: null,
+    price_per_character: null,
+    price_per_megabyte: null,
     capabilities: {
       streaming: true,
       vision: true,

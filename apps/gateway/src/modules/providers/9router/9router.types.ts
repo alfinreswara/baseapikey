@@ -73,6 +73,8 @@ export interface NineRouterWireStreamChunk {
     };
     finish_reason?: string | null | undefined;
   }>;
+  /** The usage is reported with the last chunk of a stream. */
+  usage?: NineRouterWireUsage | undefined;
 }
 
 /**

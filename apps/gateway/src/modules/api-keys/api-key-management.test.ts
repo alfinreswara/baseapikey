@@ -124,6 +124,26 @@ export async function runApiKeyManagementTests(): Promise<void> {
     assert.ok(createdKey1Id);
   }
 
+  // The requested scope is honoured, a client that asks for a narrower set of
+  // permissions must not silently receive the default scope.
+  {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/api-keys',
+      headers: {
+        authorization: `Bearer ${tokenUser1}`,
+      },
+      payload: {
+        name: 'Narrow Scope Key',
+        permissions: ['models:list'],
+      },
+    });
+    assert.equal(res.statusCode, 201);
+    const json = JSON.parse(res.payload);
+    const created = mockApiKeyRepo.apiKeys.find((key) => key.id === json.data.id);
+    assert.deepEqual(created?.permissions, ['models:list']);
+  }
+
   {
     const res = await app.inject({
       method: 'POST',
@@ -177,7 +197,7 @@ export async function runApiKeyManagementTests(): Promise<void> {
     const json = JSON.parse(res.payload);
     assert.equal(json.success, true);
     assert.ok(Array.isArray(json.data));
-    assert.equal(json.data.length, 2, 'User 1 must see exactly 2 API keys');
+    assert.equal(json.data.length, 3, 'User 1 must see exactly 3 API keys');
 
     const key = json.data[0];
     assert.ok(key.id);

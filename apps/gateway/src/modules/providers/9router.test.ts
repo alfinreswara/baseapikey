@@ -235,6 +235,30 @@ export async function runNineRouterTests(): Promise<void> {
     });
     console.log('  ✅ Request cancellation via AbortSignal passed');
 
+    // Test 12b: The usage of a stream has to survive the mapping, otherwise
+    // the streamed tokens are not metered and the credits are not deducted.
+    const usageSseBody =
+      'data: {"id":"chunk-1","object":"chat.completion.chunk","created":1700000000,"model":"llama-3.1-70b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}\n\n' +
+      'data: [DONE]\n\n';
+
+    globalThis.fetch = (async () => {
+      return new Response(usageSseBody, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const usageStream = await provider.streamChat(normRequest);
+    const usageChunks: ProviderStreamChunk[] = [];
+    for await (const chunk of usageStream) {
+      usageChunks.push(chunk);
+    }
+    assert.equal(usageChunks.length, 1);
+    assert.equal(usageChunks[0]?.usage?.promptTokens, 11);
+    assert.equal(usageChunks[0]?.usage?.completionTokens, 7);
+    assert.equal(usageChunks[0]?.usage?.totalTokens, 18);
+    console.log('  ✅ The usage of a stream chunk is mapped and kept');
+
     // Test 13: A stream that is aborted must not produce an unhandled
     // rejection. The cancel of the reader rejects with the abort reason, and
     // an unhandled rejection would terminate the whole process.

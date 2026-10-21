@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 
 import type { CreateUsageRecordDto } from './dto/usage.dto';
 import {
@@ -37,6 +38,7 @@ function usage(requestId: string): CreateUsageRecordDto {
     endpoint: '/v1/chat/completions',
     method: 'POST',
     requestId,
+    usageKey: randomUUID(),
     promptTokens: 1_000,
     completionTokens: 500,
     totalTokens: 1_500,

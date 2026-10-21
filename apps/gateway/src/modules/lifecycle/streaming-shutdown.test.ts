@@ -19,6 +19,7 @@ import { MockApiKeyRepository } from '../api-keys/testing/mock-api-key.repositor
 import { PasswordService } from '../auth/services/password.service';
 import { MockUserRepository } from '../auth/testing/auth-test-utils';
 import { HealthService } from '../health/health.service';
+import { TestModelPolicyResolver } from '../models/testing/model-policy.testing';
 import { QuotaService } from '../quota/services/quota.service';
 import { MockQuotaRepository } from '../quota/testing/mock-quota.repository';
 
@@ -226,6 +227,7 @@ async function startGateway(mode: 'finite' | 'endless'): Promise<TestContext> {
     lifecycle,
     quotaService: new QuotaService(new MockQuotaRepository()),
     usageRecorder: { record: () => undefined },
+    modelPolicyResolver: new TestModelPolicyResolver(),
   });
 
   await app.listen({ port: 0, host: '127.0.0.1' });

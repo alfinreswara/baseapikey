@@ -152,10 +152,17 @@ async function runAccountTests(): Promise<void> {
   });
   await app.ready();
 
+  // A token is only accepted when it is bound to a session.
+  const accessSession = await sessionRepository.createSession({
+    userId: USER_ID,
+    refreshTokenHash: 'hash-account-access',
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
   const accessToken = jwtService.generateAccessToken({
     userId: USER_ID,
     email: accountRepository.user.email,
     role: UserRole.USER,
+    sessionId: accessSession.id,
   });
   const authHeaders = { authorization: `Bearer ${accessToken}` };
 
@@ -235,10 +242,26 @@ async function runAccountTests(): Promise<void> {
     assert.equal((await sessionRepository.findSessionById(SESSION_ID))?.isRevoked, true);
     console.log('  ✅ Password change verifies the old secret and revokes every active session');
 
+    // The password change revoked every session, so the next request needs a
+    // token of a new session.
+    const verificationSession = await sessionRepository.createSession({
+      userId: USER_ID,
+      refreshTokenHash: 'verification-session-hash',
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const verificationHeaders = {
+      authorization: `Bearer ${jwtService.generateAccessToken({
+        userId: USER_ID,
+        email: accountRepository.user.email,
+        role: UserRole.USER,
+        sessionId: verificationSession.id,
+      })}`,
+    };
+
     const verificationRequest = await app.inject({
       method: 'POST',
       url: '/api/v1/me/email-verification/request',
-      headers: authHeaders,
+      headers: verificationHeaders,
     });
     assert.equal(verificationRequest.statusCode, 202);
     const verificationToken = notificationService.notifications.at(-1)?.token;
@@ -328,10 +351,16 @@ async function runAccountTests(): Promise<void> {
       '  ✅ Password reset is enumeration-safe, rate-limited, one-time, and revokes sessions',
     );
 
+    const guestSession = await sessionRepository.createSession({
+      userId: USER_ID,
+      refreshTokenHash: 'hash-account-guest',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
     const guestToken = jwtService.generateAccessToken({
       userId: USER_ID,
       email: accountRepository.user.email,
       role: 'GUEST',
+      sessionId: guestSession.id,
     });
     const forbidden = await app.inject({
       method: 'GET',

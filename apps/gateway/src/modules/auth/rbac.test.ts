@@ -191,16 +191,31 @@ async function runRbacTests() {
     role: UserRole.ADMIN,
   });
 
+  // An access token is only accepted when it is bound to a session, so the
+  // tokens of the test are issued for a real session.
+  const userSession = await sessionRepo.createSession({
+    userId: normalUser.id,
+    refreshTokenHash: 'hash-user-refresh',
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
+  const adminSession = await sessionRepo.createSession({
+    userId: adminUser.id,
+    refreshTokenHash: 'hash-admin-refresh',
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
+
   const userTokens = jwtService.generateTokenPair({
     userId: normalUser.id,
     email: normalUser.email,
     role: normalUser.role,
+    sessionId: userSession.id,
   });
 
   const adminTokens = jwtService.generateTokenPair({
     userId: adminUser.id,
     email: adminUser.email,
     role: adminUser.role,
+    sessionId: adminSession.id,
   });
 
   const app = buildApp({

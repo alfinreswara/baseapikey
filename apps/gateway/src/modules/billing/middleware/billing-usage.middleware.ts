@@ -26,7 +26,10 @@ export class PrismaOrganizationBillingGuard implements IOrganizationBillingGuard
         status: organization.billingAccount.status,
       });
     }
-    if (organization.billingAccount.creditBalanceCents < 0) {
+    if (organization.billingAccount.creditBalanceCents <= 0) {
+      // The charge of the usage never lets the balance become negative, so a
+      // balance of zero already means that the account can not pay for a
+      // request.
       throw new BillingUsageBlockedError('Credit balance is exhausted', {
         creditBalanceCents: organization.billingAccount.creditBalanceCents,
       });

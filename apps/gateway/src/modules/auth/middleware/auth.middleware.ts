@@ -72,8 +72,15 @@ export function authenticate(
       throw new InvalidTokenError('Malformed token payload: missing required claims');
     }
 
-    // Session validation & revocation check if sessionRepository is provided and sessionId exists
-    if (options.sessionRepository && payload.sessionId) {
+    // Session validation & revocation. A token that is not bound to a
+    // session can never be revoked, so it is rejected when the session
+    // repository is available.
+    if (options.sessionRepository) {
+      if (!payload.sessionId) {
+        throw new UnauthorizedError(
+          'Access token is not bound to a session and cannot be validated',
+        );
+      }
       const session = await options.sessionRepository.findSessionById(payload.sessionId);
       if (!session || session.isRevoked || session.expiresAt <= new Date()) {
         throw new UnauthorizedError(

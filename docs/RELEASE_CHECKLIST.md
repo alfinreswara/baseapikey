@@ -27,6 +27,18 @@
       the Prisma models.
 - [ ] The API key authentication, a chat completion, and a streaming response were verified
       against the staging database.
+- [ ] The model catalogue is populated, every model has a price or is explicitly free, and a
+      request for an unknown or unpriced model is rejected before the provider is called.
+- [ ] The billing concurrency tests pass against the staging database:
+      `pnpm --filter @baseapikey/gateway test:concurrency`.
+- [ ] The credit reservation tests pass against the staging database:
+      `pnpm --filter @baseapikey/gateway test:reservation`.
+- [ ] The expired credit reservations of a stopped instance are recovered after a restart and
+      the instance stays unready until the recovery succeeded.
+- [ ] The credit of a running request is never released early: the lease of the reservation is
+      renewed while the request runs, and `REQUEST_DEADLINE_MS` bounds the request.
+- [ ] The CI check **Prisma Migration Check** is green on `main`, it runs the billing integration
+      tests against a real PostgreSQL.
 - [ ] A client disconnect releases the upstream request, and an upstream failure is reported as
       an error response.
 - [ ] A cache outage keeps the instance alive, the readiness reports the cache as unavailable,

@@ -54,6 +54,20 @@ export const CreateModelSchema = z
     maxOutputTokens: z.number().int().positive().max(10_000_000),
     inputPricePerMillion: z.number().nonnegative().max(1_000_000),
     outputPricePerMillion: z.number().nonnegative().max(1_000_000),
+    /**
+     * A model without a price is rejected unless it is explicitly marked as
+     * free. The default is false, a model with a price is never free.
+     */
+    isFree: z.boolean().optional(),
+    /**
+     * The price of one generated image. A model without a price for its
+     * modality is rejected before the provider is called.
+     */
+    pricePerImage: z.number().nonnegative().max(1_000_000).nullable().optional(),
+    /** The price of one character of synthesized speech. */
+    pricePerCharacter: z.number().nonnegative().max(1_000_000).nullable().optional(),
+    /** The price of one megabyte of transcribed audio. */
+    pricePerMegabyte: z.number().nonnegative().max(1_000_000).nullable().optional(),
     supportsStreaming: z.boolean().optional(),
     supportsVision: z.boolean().optional(),
     supportsFunctionCalling: z.boolean().optional(),

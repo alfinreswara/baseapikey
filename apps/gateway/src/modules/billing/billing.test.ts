@@ -16,6 +16,8 @@ import { BillingService } from './services/billing.service';
 const now = new Date('2026-09-19T00:00:00.000Z');
 let applied = 0;
 
+const processedEvents = new Set<string>();
+
 const repository: IBillingRepository = {
   getAccess: async (_organizationId, userId) =>
     userId === 'member'
@@ -57,7 +59,14 @@ const repository: IBillingRepository = {
       createdAt: now,
     },
   ],
-  applyCreditPurchase: async ({ amountCents }) => {
+  applyCreditPurchase: async ({ amountCents, providerEventId }) => {
+    // The repository of the application rejects a replay of an event that was
+    // already processed, the event id is the identity of the event and not
+    // the provider of the path.
+    if (processedEvents.has(providerEventId)) {
+      return { applied: false, balanceAfterCents: 1200 + amountCents };
+    }
+    processedEvents.add(providerEventId);
     applied += 1;
     return { applied: true, balanceAfterCents: 1200 + amountCents };
   },
@@ -105,6 +114,12 @@ async function run(): Promise<void> {
     service.processWebhook('test-payments', '0'.repeat(64), webhook),
     InvalidBillingWebhookError,
   );
+
+  // A replay of a captured event under another provider name must not credit
+  // the balance again. The signature does not cover the provider of the path.
+  const replay = await service.processWebhook('another-payments', signature, webhook);
+  assert.equal(replay.applied, false, 'A replay under another provider name must not be applied');
+  assert.equal(applied, 1, 'The replay must not credit the balance a second time');
   console.log('✅ Billing access, checkout, and signed webhook tests passed');
 }
 

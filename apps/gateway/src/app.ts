@@ -55,6 +55,11 @@ import {
   PrismaBillingRepository,
 } from './modules/billing/repositories/billing.repository';
 import { BillingService } from './modules/billing/services/billing.service';
+import { CreditAuthorizationService } from './modules/billing/services/credit-authorization.service';
+import {
+  PrismaReservationService,
+  type IReservationService,
+} from './modules/billing/services/reservation.service';
 import { chatRoutes } from './modules/chat/chat.routes';
 import { healthRoutes } from './modules/health/health.routes';
 import type { HealthService } from './modules/health/health.service';
@@ -70,6 +75,11 @@ import {
   PrismaModelCatalogRepository,
 } from './modules/models/repositories/model-catalog.repository';
 import { ModelCatalogService } from './modules/models/services/model-catalog.service';
+import {
+  ModelPolicyService,
+  type ModelPolicyResolver,
+  UnavailableModelPolicyResolver,
+} from './modules/models/services/model-policy.service';
 import type { IErrorReporter } from './modules/observability/error-reporter';
 import type { IOrganizationContextResolver } from './modules/organizations/middleware/organization-context.middleware';
 import { organizationRoutes } from './modules/organizations/organization.routes';
@@ -135,6 +145,17 @@ export interface BuildAppOptions {
   errorReporter?: IErrorReporter;
   /** Shared lifecycle state, used to reject new requests while draining. */
   lifecycle?: ServiceLifecycle;
+  /** Resolves the model, the provider, and the price of a request. */
+  modelPolicyResolver?: ModelPolicyResolver;
+  /** Reserves the credit of the requests and recovers the expired ones. */
+  reservationService?: IReservationService;
+  /**
+   * The deadline of a request that reaches a provider. It bounds the lifetime
+   * of a request, the provider timeout only bounds a single provider call.
+   */
+  requestDeadlineMs?: number;
+  /** The duration and the renewal interval of the lease of a reservation. */
+  reservationLease?: { lifetimeMs?: number; renewalIntervalMs?: number };
 }
 
 /** Routes that stay reachable while the instance drains. */
@@ -238,6 +259,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   );
   const inferenceModelResolver =
     options.modelCatalogRepository || process.env['DATABASE_URL'] ? modelCatalogService : undefined;
+  // The model, the provider, and the price are always taken from the
+  // catalogue. Without a catalogue no request can be priced, so the requests
+  // are rejected instead of being served with an unknown price.
+  // The credit of a request is reserved before it reaches a provider and
+  // settled when the real usage is known.
+  const reservationService = options.reservationService ?? new PrismaReservationService();
+  const creditAuthorization = new CreditAuthorizationService(reservationService, {
+    ...(options.reservationLease?.lifetimeMs !== undefined
+      ? { leaseLifetimeMs: options.reservationLease.lifetimeMs }
+      : {}),
+    ...(options.reservationLease?.renewalIntervalMs !== undefined
+      ? { leaseRenewalIntervalMs: options.reservationLease.renewalIntervalMs }
+      : {}),
+  });
+  const modelPolicyResolver: ModelPolicyResolver =
+    options.modelPolicyResolver ??
+    (inferenceModelResolver
+      ? new ModelPolicyService(modelCatalogService)
+      : new UnavailableModelPolicyResolver());
   const usageAnalyticsService = new UsageAnalyticsService(
     options.usageAnalyticsRepository ?? new PrismaUsageAnalyticsRepository(),
   );
@@ -463,8 +503,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     providerRegistry,
     resilientRouter,
     quotaService,
+    creditAuthorization,
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
+    modelPolicyResolver,
+    ...(options.requestDeadlineMs !== undefined
+      ? { requestDeadlineMs: options.requestDeadlineMs }
+      : {}),
   });
   void app.register(inferenceRoutes, {
     apiKeyRepository,
@@ -472,8 +517,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     providerRegistry,
     resilientRouter,
     quotaService,
+    creditAuthorization,
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
+    modelPolicyResolver,
+    ...(options.requestDeadlineMs !== undefined
+      ? { requestDeadlineMs: options.requestDeadlineMs }
+      : {}),
   });
   void app.register(modelRoutes, { modelCatalogService });
   void app.register(usageRoutes, {

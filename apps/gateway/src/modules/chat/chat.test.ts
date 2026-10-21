@@ -17,6 +17,7 @@ import { buildApp } from '../../app';
 import { MockApiKeyRepository } from '../api-keys/testing/mock-api-key.repository';
 import { PasswordService } from '../auth/services/password.service';
 import { MockUserRepository } from '../auth/testing/auth-test-utils';
+import { TestModelPolicyResolver } from '../models/testing/model-policy.testing';
 import { QuotaService } from '../quota/services/quota.service';
 import { MockQuotaRepository } from '../quota/testing/mock-quota.repository';
 import type { CreateUsageRecordDto } from '../usage/dto/usage.dto';
@@ -268,6 +269,7 @@ export async function runChatCompletionTests(): Promise<void> {
   registry.register(mockProvider);
 
   const app = buildApp({
+    modelPolicyResolver: new TestModelPolicyResolver(),
     userRepository: userRepo,
     apiKeyRepository: apiKeyRepo,
     providerRegistry: registry,
@@ -482,6 +484,7 @@ export async function runChatCompletionTests(): Promise<void> {
       requestsMinute: 1,
     });
     const appQuotaBlocked = buildApp({
+      modelPolicyResolver: new TestModelPolicyResolver(),
       userRepository: userRepo,
       apiKeyRepository: apiKeyRepo,
       providerRegistry: registry,
@@ -517,6 +520,7 @@ export async function runChatCompletionTests(): Promise<void> {
       ),
     );
     const appErrBefore = buildApp({
+      modelPolicyResolver: new TestModelPolicyResolver(),
       userRepository: userRepo,
       apiKeyRepository: apiKeyRepo,
       providerRegistry: errRegistryBefore,
@@ -550,6 +554,7 @@ export async function runChatCompletionTests(): Promise<void> {
       ),
     );
     const appErrMid = buildApp({
+      modelPolicyResolver: new TestModelPolicyResolver(),
       userRepository: userRepo,
       apiKeyRepository: apiKeyRepo,
       providerRegistry: errRegistryMid,

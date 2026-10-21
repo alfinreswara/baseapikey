@@ -15,6 +15,14 @@ export const ModelCatalogItemSchema = z.object({
     input: z.number().nonnegative(),
     output: z.number().nonnegative(),
   }),
+  /** The model is explicitly configured as free by an administrator. */
+  is_free: z.boolean(),
+  /** The price of one generated image, in US dollars. */
+  price_per_image: z.number().nonnegative().nullable(),
+  /** The price of one character of synthesized speech, in US dollars. */
+  price_per_character: z.number().nonnegative().nullable(),
+  /** The price of one megabyte of transcribed audio, in US dollars. */
+  price_per_megabyte: z.number().nonnegative().nullable(),
   capabilities: z.object({
     streaming: z.boolean(),
     vision: z.boolean(),
