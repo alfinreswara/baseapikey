@@ -94,6 +94,13 @@ function stepIf(step) {
   return match ? match[1].trim() : undefined;
 }
 
+/** The environment of the job, its keys are indented deeper than the ones of the workflow. */
+function jobEnv(text, key) {
+  const pattern = new RegExp(`^ {6}${key}: (.*)$`, 'm');
+  const match = pattern.exec(text);
+  return match ? match[1].trim().replace(/^'(.*)'$/, '$1') : undefined;
+}
+
 function workflowEnv(text, key) {
   const pattern = new RegExp(`^ {2}${key}: (.*)$`, 'm');
   const match = pattern.exec(text);
@@ -112,6 +119,19 @@ const platforms = (workflowEnv(text, 'RELEASE_PLATFORMS') ?? '')
   .map((value) => value.trim())
   .filter((value) => value.length > 0);
 const scanTag = workflowEnv(text, 'SCAN_TAG') ?? '';
+const scanImage = jobEnv(text, 'SCAN_IMAGE') ?? '';
+const scanRegistry = jobEnv(text, 'SCAN_REGISTRY') ?? '';
+
+// The image of the gate is never in a public registry. It is built and
+// scanned in the registry of the runner, in the dry run and in the release.
+check(
+  scanImage.length > 0 && !scanImage.includes('ghcr.io'),
+  'the image of the gate must not live in a public registry',
+);
+check(
+  scanRegistry.length > 0 && !scanRegistry.includes('ghcr.io'),
+  'the scan registry of the gate must not be a public registry',
+);
 
 // 1. The build pushes to the scan tag, never to a release tag.
 const build = steps.find((step) => step.name.includes('Build the image'));
@@ -136,6 +156,15 @@ if (build) {
     'the build step must push the image to the scan registry',
   );
   check(
+    !tags.includes('ghcr.io'),
+    'the build step must not push the image to a public registry, the image of the gate is ' +
+      'never public before the scan',
+  );
+  check(
+    tags.includes('env.SCAN_IMAGE'),
+    'the build step must push to the image of the scan registry',
+  );
+  check(
     (stepInput(build, 'provenance') ?? '').includes('mode=max'),
     'the release must generate the provenance attestation',
   );
@@ -151,6 +180,15 @@ for (const platform of platforms) {
   );
 }
 for (const scan of scans) {
+  const imageRef = stepInput(scan, 'image-ref') ?? '';
+  check(
+    imageRef.includes('SCAN_IMAGE') && imageRef.includes('SCAN_TAG'),
+    `the scan step "${scan.name}" must read the image of the scan registry`,
+  );
+  check(
+    !imageRef.includes('ghcr.io'),
+    `the scan step "${scan.name}" must not read the image from a public registry`,
+  );
   check(
     stepInput(scan, 'exit-code') === '1',
     `the scan step "${scan.name}" must fail the job on a finding`,
@@ -182,6 +220,10 @@ if (publish && build) {
     'the publication must create the release tags from the digest of the scanned image',
   );
   check(
+    stepEnv(publish, 'SCAN_IMAGE')?.includes('SCAN_IMAGE'),
+    'the publication must copy the image of the scan registry',
+  );
+  check(
     stepEnv(publish, 'RELEASE_VERSION')?.includes('inputs.version'),
     'the publication must create the tag of the release version',
   );
@@ -203,16 +245,36 @@ if (login) {
     (stepIf(login) ?? '').includes('inputs.publish'),
     'the registry login must only run when the publication is requested',
   );
+  if (scans.length > 0) {
+    check(
+      login.line > scans[scans.length - 1].line,
+      'the registry login must run after the scan, the credential is used for the copy only',
+    );
+  }
 }
-const localRegistry = steps.find((step) => step.name.includes('local scan registry'));
+
+// The scan registry of the runner holds the image while it is scanned. It is
+// used by the dry run and by the release, the image of the gate is never in a
+// public registry.
+const localRegistry = steps.find((step) => step.name.includes('scan registry'));
 check(
   localRegistry !== undefined,
-  'the dry run must scan against a registry of the runner, it never writes to GHCR',
+  'the workflow must scan against a registry of the runner, it never writes to GHCR',
 );
-if (localRegistry) {
+if (localRegistry && !localRegistry.name.includes('Remove')) {
   check(
-    (stepIf(localRegistry) ?? '').includes('!inputs.publish'),
-    'the local scan registry must only run for the dry run',
+    (stepIf(localRegistry) ?? '') === '',
+    'the scan registry of the runner must run for the dry run and for the release',
+  );
+}
+
+// The temporary artifact of the gate is removed.
+const cleanup = steps.find((step) => step.name.includes('Remove the scan registry'));
+check(cleanup !== undefined, 'the workflow does not remove the scan registry');
+if (cleanup) {
+  check(
+    (stepIf(cleanup) ?? '').includes('always()'),
+    'the scan registry must be removed even when the job fails',
   );
 }
 
@@ -255,6 +317,18 @@ check(
   existsSync(PUBLISH_SCRIPT),
   'the publication script scripts/publish-release-image.mjs does not exist',
 );
+if (existsSync(PUBLISH_SCRIPT)) {
+  const script = readFileSync(PUBLISH_SCRIPT, 'utf8');
+  check(
+    script.includes('--preserve-digests'),
+    'the publication must copy the manifest without a conversion, the digest must not change',
+  );
+  check(script.includes('--all'), 'the publication must copy every platform of the image');
+  check(
+    script.includes('published !== scanDigest'),
+    'the publication must verify that the published digest is the scanned digest',
+  );
+}
 
 if (failures.length > 0) {
   console.error('❌ The release workflow validation failed:');
