@@ -55,6 +55,8 @@ import {
   PrismaBillingRepository,
 } from './modules/billing/repositories/billing.repository';
 import { BillingService } from './modules/billing/services/billing.service';
+import { CreditAuthorizationService } from './modules/billing/services/credit-authorization.service';
+import { PrismaReservationService } from './modules/billing/services/reservation.service';
 import { chatRoutes } from './modules/chat/chat.routes';
 import { healthRoutes } from './modules/health/health.routes';
 import type { HealthService } from './modules/health/health.service';
@@ -248,6 +250,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   // The model, the provider, and the price are always taken from the
   // catalogue. Without a catalogue no request can be priced, so the requests
   // are rejected instead of being served with an unknown price.
+  // The credit of a request is reserved before it reaches a provider and
+  // settled when the real usage is known.
+  const reservationService = new PrismaReservationService();
+  const creditAuthorization = new CreditAuthorizationService(reservationService);
   const modelPolicyResolver: ModelPolicyResolver =
     options.modelPolicyResolver ??
     (inferenceModelResolver
@@ -478,6 +484,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     providerRegistry,
     resilientRouter,
     quotaService,
+    creditAuthorization,
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
     modelPolicyResolver,
@@ -488,6 +495,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     providerRegistry,
     resilientRouter,
     quotaService,
+    creditAuthorization,
     ...(options.billingUsageGuard ? { billingGuard: options.billingUsageGuard } : {}),
     ...(inferenceModelResolver ? { modelCatalogService: inferenceModelResolver } : {}),
     modelPolicyResolver,

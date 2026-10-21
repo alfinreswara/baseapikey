@@ -59,6 +59,15 @@ export const CreateModelSchema = z
      * free. The default is false, a model with a price is never free.
      */
     isFree: z.boolean().optional(),
+    /**
+     * The price of one generated image. A model without a price for its
+     * modality is rejected before the provider is called.
+     */
+    pricePerImage: z.number().nonnegative().max(1_000_000).nullable().optional(),
+    /** The price of one character of synthesized speech. */
+    pricePerCharacter: z.number().nonnegative().max(1_000_000).nullable().optional(),
+    /** The price of one megabyte of transcribed audio. */
+    pricePerMegabyte: z.number().nonnegative().max(1_000_000).nullable().optional(),
     supportsStreaming: z.boolean().optional(),
     supportsVision: z.boolean().optional(),
     supportsFunctionCalling: z.boolean().optional(),

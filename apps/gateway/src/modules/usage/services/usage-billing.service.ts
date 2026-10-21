@@ -7,6 +7,9 @@ export interface IUsageBillingService {
     estimatedCostUsd: number;
     model: string;
     requestId: string;
+    reservationId?: string | null | undefined;
+    /** False when the request failed before the provider reported a usage. */
+    usageKnown?: boolean | undefined;
   }): Promise<void>;
 }
 
@@ -35,6 +38,7 @@ interface LockedAccount {
   id: string;
   creditBalanceCents: number;
   unbilledUsageMicros: number;
+  reservedMicros: bigint;
 }
 
 /**
@@ -43,11 +47,15 @@ interface LockedAccount {
  * The whole charge runs in one transaction and the row of the billing account
  * is locked while it runs, so the charges of an organization are serialized:
  *
+ * - the reservation of the request is settled exactly once, the held credit is
+ *   returned and the real cost is charged,
  * - the balance is decremented with a relative and conditional update, it can
  *   never become negative and it can never overwrite the update of another
  *   charge,
- * - the spending limit is checked while the account is locked,
- * - the ledger entry is written with the idempotency key of the usage event.
+ * - the spending limit is checked against the settled cost plus the credit
+ *   that is held for the other running requests. The two are never counted
+ *   twice, the unsettled usage is covered by its reservation.
+ * - the ledger entry uses the id of the usage event as its idempotency key.
  *   The unique constraint of the database rejects a second entry, so a retry
  *   never charges the balance a second time.
  */
@@ -58,33 +66,56 @@ export class PrismaUsageBillingService implements IUsageBillingService {
     estimatedCostUsd: number;
     model: string;
     requestId: string;
+    reservationId?: string | null | undefined;
+    usageKnown?: boolean | undefined;
   }): Promise<void> {
     const costMicros = Math.max(0, Math.round(data.estimatedCostUsd * 1_000_000));
-    if (costMicros === 0) return;
-
     const idempotencyKey = `usage:${data.usageId}`;
+
+    if (costMicros === 0 && !data.reservationId) {
+      return;
+    }
 
     try {
       await prisma.$transaction(async (tx) => {
-        // The lock serializes the charges of the organization.
-        const rows = await tx.$queryRaw<LockedAccount[]>`
-          SELECT id,
-                 credit_balance_cents AS "creditBalanceCents",
-                 unbilled_usage_micros AS "unbilledUsageMicros"
-          FROM billing_accounts
-          WHERE organization_id = ${data.organizationId}::uuid
-          FOR UPDATE
-        `;
-        const account = rows[0];
+        const account = await this.lockAccount(tx, data.organizationId);
         if (!account) {
           // Without a billing account there is nothing to charge.
           return;
         }
 
-        const spendingLimitCents = await this.getSpendingLimitCents(tx, data.organizationId);
-        if (spendingLimitCents !== null) {
-          const spentMicros = await this.getSpentMicros(tx, data.organizationId);
-          if (spentMicros + costMicros > spendingLimitCents * MICROS_PER_CENT) {
+        // The reservation of the request is settled. The transition is a
+        // conditional update, a concurrent settlement finds the status
+        // already changed and does nothing.
+        let reservedMicros = Number(account.reservedMicros);
+        if (data.reservationId && data.usageKnown !== false) {
+          // The reservation is read before the transition, the status tells
+          // whether the credit is still held.
+          const reservation = await tx.billingReservation.findUnique({
+            where: { id: data.reservationId },
+            select: { amountMicros: true, status: true },
+          });
+          const settled = await tx.billingReservation.updateMany({
+            where: { id: data.reservationId, status: { in: ['RESERVED', 'EXPIRED'] } },
+            data: { status: 'SETTLED' },
+          });
+          if (settled.count > 0 && reservation?.status === 'RESERVED') {
+            reservedMicros -= Number(reservation.amountMicros);
+            await tx.billingAccount.update({
+              where: { id: account.id },
+              data: { reservedMicros: { decrement: reservation.amountMicros } },
+            });
+          }
+        }
+
+        if (costMicros === 0) {
+          return;
+        }
+
+        const spendingLimitMicros = await this.getSpendingLimitMicros(tx, data.organizationId);
+        if (spendingLimitMicros !== null) {
+          const settledMicros = await this.getSettledMicros(tx, data.organizationId);
+          if (settledMicros + reservedMicros + costMicros > spendingLimitMicros) {
             throw new ChargeRejectedError('spending-limit');
           }
         }
@@ -118,6 +149,7 @@ export class PrismaUsageBillingService implements IUsageBillingService {
             billingAccountId: account.id,
             type: CreditTransactionType.USAGE,
             amountCents: -billableCents,
+            costMicros,
             balanceAfterCents: account.creditBalanceCents - billableCents,
             idempotencyKey,
             description: `AI usage: ${data.model}`,
@@ -126,6 +158,7 @@ export class PrismaUsageBillingService implements IUsageBillingService {
               requestId: data.requestId,
               costMicros,
               unbilledUsageMicros,
+              ...(data.reservationId ? { reservationId: data.reservationId } : {}),
             },
           },
         });
@@ -149,7 +182,34 @@ export class PrismaUsageBillingService implements IUsageBillingService {
     }
   }
 
-  private async getSpendingLimitCents(
+  private async lockAccount(
+    tx: {
+      $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+    },
+    organizationId: string,
+  ): Promise<LockedAccount | null> {
+    // The lock serializes the charges and the reservations of the
+    // organization.
+    const rows = (await tx.$queryRaw`
+      SELECT id,
+             credit_balance_cents AS "creditBalanceCents",
+             unbilled_usage_micros AS "unbilledUsageMicros",
+             reserved_micros AS "reservedMicros"
+      FROM billing_accounts
+      WHERE organization_id = ${organizationId}::uuid
+      FOR UPDATE
+    `) as LockedAccount[];
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      creditBalanceCents: Number(row.creditBalanceCents),
+      unbilledUsageMicros: Number(row.unbilledUsageMicros),
+      reservedMicros: BigInt(row.reservedMicros ?? 0),
+    };
+  }
+
+  private async getSpendingLimitMicros(
     tx: { organization: { findFirst: (args: never) => Promise<unknown> } },
     organizationId: string,
   ): Promise<number | null> {
@@ -157,22 +217,36 @@ export class PrismaUsageBillingService implements IUsageBillingService {
       where: { id: organizationId },
       select: { spendingLimitCents: true },
     } as never)) as { spendingLimitCents: number | null } | null;
-    return organization?.spendingLimitCents ?? null;
+    if (
+      organization?.spendingLimitCents === null ||
+      organization?.spendingLimitCents === undefined
+    ) {
+      return null;
+    }
+    return organization.spendingLimitCents * MICROS_PER_CENT;
   }
 
-  private async getSpentMicros(
-    tx: { usage: { aggregate: (args: never) => Promise<unknown> } },
+  /**
+   * The settled cost of the current period. Only the settled entries are
+   * counted, the credit of the open reservations is counted separately, so the
+   * two are never added twice.
+   */
+  private async getSettledMicros(
+    tx: { creditTransaction: { aggregate: (args: never) => Promise<unknown> } },
     organizationId: string,
   ): Promise<number> {
     const monthStart = new Date();
     monthStart.setUTCDate(1);
     monthStart.setUTCHours(0, 0, 0, 0);
-    const aggregate = (await tx.usage.aggregate({
-      where: { organizationId, createdAt: { gte: monthStart } },
-      _sum: { estimatedCost: true },
-    } as never)) as { _sum: { estimatedCost: unknown } | null };
-    const spent = Number(aggregate._sum?.estimatedCost ?? 0);
-    return Math.round(spent * 1_000_000);
+    const aggregate = (await tx.creditTransaction.aggregate({
+      where: {
+        billingAccount: { organizationId },
+        type: 'USAGE',
+        createdAt: { gte: monthStart },
+      },
+      _sum: { costMicros: true },
+    } as never)) as { _sum: { costMicros: number | null } | null };
+    return aggregate._sum?.costMicros ?? 0;
   }
 
   private async recordRejectedCharge(

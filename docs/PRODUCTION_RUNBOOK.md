@@ -97,6 +97,48 @@ managed with `POST /api/v1/admin/models`, the price of a model is
 `inputPricePerMillion` and `outputPricePerMillion`, and a model that is
 explicitly free carries `isFree: true`.
 
+## Credit reservation and settlement
+
+Every request that can cost money reserves the credit of the organization
+before it is forwarded to a provider. The reservation is the authorization of
+the request: a request without a reservation never reaches a provider.
+
+- The reservation holds the upper bound of the cost of the request. The bound
+  of the prompt is the size of the body, a token can not be shorter than a
+  byte. The bound of the answer is the maximum number of the output tokens of
+  the model. The bound is only used for the reservation, the settlement uses
+  the real usage.
+- The reservation is atomic. The row of the billing account is locked, the
+  available credit and the spending limit are checked, and the held credit is
+  increased with a relative update. The available credit is the balance, the
+  unbilled usage and the credit that is held for the running requests.
+- The spending limit counts the settled cost of the period plus the credit
+  that is held for the running requests. The two are never added twice, the
+  unsettled usage is covered by its reservation.
+- The reservation has a status: `RESERVED`, `SETTLED`, `RELEASED` or
+  `EXPIRED`. Every transition is a conditional update, so it happens exactly
+  once. The settlement of the reservation and the ledger entry are written in
+  the same transaction as the deduction of the balance.
+- A request that never reached the provider releases its reservation, the
+  credit becomes available again.
+- A request that failed after the provider was called keeps its reservation.
+  The credit of a request that may still have been processed by the provider
+  is only returned after the deadline of the reservation has passed. The
+  deadline is longer than the maximum lifetime of a request, it is never
+  derived from an arbitrary age.
+- A reservation of a process that stopped is recovered by the startup
+  recovery and by the reservation of the next request. A late settlement of a
+  recovered reservation still charges the real cost, the unique constraint of
+  the ledger decides.
+- The idempotency key of a request identifies its reservation, its usage event
+  and its ledger entry. A retry of the request, of the delivery queue or of
+  the settlement never reserves, records or charges twice.
+
+The unit of the reservation is the micro dollar, the same unit as the
+unbilled usage accumulator. One cent are ten thousand micros. The catalogue
+prices are US dollars per million tokens, the ledger stores the exact cost in
+micros next to the rounded amount in cents, so no rounding can lose a cost.
+
 ## Credit balance and the spending limit
 
 The credit of an organization is deducted in one transaction, while the row of
@@ -112,6 +154,15 @@ the billing account is locked:
 - a usage event that can not be charged stays visible as an unpaid usage
   event, and the rejection is recorded in the audit trail with the action
   `BILLING_CHARGE_REJECTED`.
+
+The prices of the modalities that are not billed per token are part of the
+catalogue as well: `pricePerImage`, `pricePerCharacter` and
+`pricePerMegabyte`. The server measures the unit it bills, the number of the
+images, the number of the characters of the speech input and the size of the
+transcribed audio. A model without a price for its modality is rejected before
+the provider is called, it is never served for free. The unit of the price has
+to match the billing unit of the provider, the administrator owns that
+configuration.
 
 A request that needs a credit reservation before it is served is not
 implemented yet. The reservation would reserve the upper bound of the request

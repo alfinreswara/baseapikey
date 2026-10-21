@@ -1,7 +1,14 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+import type { CreditAuthorizationService } from '../../billing/services/credit-authorization.service';
+import { RESERVATION_LIFETIME_MS } from '../../billing/services/reservation.service';
 import {
+  estimateMaxCostMicros,
+  estimateModelCostUsd,
+  type ModalityUsage,
   type ModelCategory,
+  type ModelModality,
+  type ModelPolicy,
   type ModelPolicyResolver,
 } from '../../models/services/model-policy.service';
 import {
@@ -14,11 +21,56 @@ import {
 import type { InferenceService } from '../services/inference.service';
 import { parseAudioMultipart } from '../utils/multipart.util';
 
+/**
+ * The number of tokens of an embedding input is not known before the provider
+ * processed the request. The size of the input is an upper bound, a token can
+ * not be shorter than a byte.
+ */
+function estimateEmbeddingTokenBound(input: unknown): number {
+  if (typeof input === 'string') return input.length;
+  if (Array.isArray(input)) {
+    return input.reduce((total: number, item: unknown) => {
+      if (typeof item === 'string') return total + item.length;
+      if (Array.isArray(item)) return total + item.length;
+      return total + 1;
+    }, 0);
+  }
+  return 0;
+}
+
 export class InferenceController {
   constructor(
     private readonly service: InferenceService,
     private readonly policyResolver: ModelPolicyResolver,
+    private readonly creditAuthorization: CreditAuthorizationService,
   ) {}
+
+  /**
+   * Reserves the credit of the request before it is forwarded to a provider.
+   * A modality without a verifiable price is rejected before the provider is
+   * called.
+   */
+  private async authorize(
+    request: FastifyRequest,
+    policy: ModelPolicy,
+    modality: ModelModality,
+    usage: ModalityUsage,
+  ): Promise<string | null> {
+    this.policyResolver.assertModality(policy, modality);
+    const organizationId = request.apiKey?.organizationId ?? null;
+    if (!organizationId) {
+      return null;
+    }
+    return this.creditAuthorization.reserve({
+      organizationId,
+      apiKeyId: request.apiKey?.id ?? null,
+      requestId: request.id,
+      idempotencyKey: request.usageMetadata?.usageKey ?? request.id,
+      modality,
+      amountMicros: estimateMaxCostMicros(policy, modality, usage),
+      expiresAt: new Date(Date.now() + RESERVATION_LIFETIME_MS),
+    });
+  }
 
   /**
    * Resolves the policy of the model before the request reaches a provider.
@@ -40,7 +92,14 @@ export class InferenceController {
     const policy = await this.resolvePolicy(dto.model, dto.provider, 'EMBEDDING');
     dto.provider = policy.providerSlug;
     dto.model = policy.modelId;
-    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
+    const reservationId = await this.authorize(request, policy, 'embedding', {
+      promptTokens: estimateEmbeddingTokenBound(dto.input),
+    });
+    request.usageMetadata = {
+      provider: policy.providerSlug,
+      model: policy.modelId,
+      ...(reservationId ? { reservationId } : {}),
+    };
     const result = await this.withAbort(reply, (signal) =>
       this.service.createEmbedding(dto, { signal }),
     );
@@ -48,6 +107,9 @@ export class InferenceController {
       ...request.usageMetadata,
       promptTokens: result.usage.prompt_tokens,
       totalTokens: result.usage.total_tokens,
+      estimatedCost: estimateModelCostUsd(policy, 'embedding', {
+        promptTokens: result.usage.prompt_tokens,
+      }),
     };
     void reply.status(200).send(result);
   }
@@ -61,10 +123,23 @@ export class InferenceController {
     );
     dto.provider = policy.providerSlug;
     dto.model = policy.modelId;
-    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
+    const reservationId = await this.authorize(request, policy, 'image', {
+      images: dto.n ?? 1,
+    });
+    request.usageMetadata = {
+      provider: policy.providerSlug,
+      model: policy.modelId,
+      ...(reservationId ? { reservationId } : {}),
+    };
     const result = await this.withAbort(reply, (signal) =>
       this.service.createImage(dto, { signal }),
     );
+    request.usageMetadata = {
+      ...request.usageMetadata,
+      estimatedCost: estimateModelCostUsd(policy, 'image', {
+        images: Array.isArray(result.data) ? result.data.length : (dto.n ?? 1),
+      }),
+    };
     void reply.status(200).send(result);
   }
 
@@ -73,10 +148,23 @@ export class InferenceController {
     const policy = await this.resolvePolicy(dto.model, dto.provider, 'AUDIO');
     dto.provider = policy.providerSlug;
     dto.model = policy.modelId;
-    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
+    const reservationId = await this.authorize(request, policy, 'speech', {
+      characters: dto.input.length,
+    });
+    request.usageMetadata = {
+      provider: policy.providerSlug,
+      model: policy.modelId,
+      ...(reservationId ? { reservationId } : {}),
+    };
     const result = await this.withAbort(reply, (signal) =>
       this.service.createSpeech(dto, { signal }),
     );
+    request.usageMetadata = {
+      ...request.usageMetadata,
+      estimatedCost: estimateModelCostUsd(policy, 'speech', {
+        characters: dto.input.length,
+      }),
+    };
     void reply
       .header('Content-Type', result.contentType)
       .status(200)
@@ -93,7 +181,14 @@ export class InferenceController {
     const policy = await this.resolvePolicy(fields.model, fields.provider, 'AUDIO');
     fields.provider = policy.providerSlug;
     fields.model = policy.modelId;
-    request.usageMetadata = { provider: policy.providerSlug, model: policy.modelId };
+    const reservationId = await this.authorize(request, policy, 'transcription', {
+      bytes: multipart.file.data.length,
+    });
+    request.usageMetadata = {
+      provider: policy.providerSlug,
+      model: policy.modelId,
+      ...(reservationId ? { reservationId } : {}),
+    };
     const result = await this.withAbort(reply, (signal) =>
       this.service.transcribeAudio(fields, multipart.file, { signal }),
     );

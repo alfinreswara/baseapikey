@@ -10,6 +10,9 @@ export interface TestModelPolicyOptions {
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
   isFree?: boolean;
+  pricePerImage?: number | null;
+  pricePerCharacter?: number | null;
+  pricePerMegabyte?: number | null;
   maxOutputTokens?: number;
   category?: ModelCategory;
 }
@@ -31,10 +34,17 @@ export class TestModelPolicyResolver implements ModelPolicyResolver {
       providerSlug,
       inputPricePerMillion: this.options.inputPricePerMillion ?? 1,
       outputPricePerMillion: this.options.outputPricePerMillion ?? 2,
+      pricePerImage: this.options.pricePerImage ?? 0.04,
+      pricePerCharacter: this.options.pricePerCharacter ?? 0.000_03,
+      pricePerMegabyte: this.options.pricePerMegabyte ?? 0.006,
       maxOutputTokens: this.options.maxOutputTokens ?? 8_192,
       category: this.options.category ?? 'CHAT',
       isFree: this.options.isFree ?? false,
     };
+  }
+
+  assertModality(): void {
+    // Every modality is priced in the tests.
   }
 
   assertCategory(policy: ModelPolicy, expectedCategory: ModelCategory): void {

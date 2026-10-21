@@ -147,6 +147,9 @@ export class ModelCatalogService {
         output: record.outputPricePerMillion,
       },
       is_free: record.isFree,
+      price_per_image: record.pricePerImage,
+      price_per_character: record.pricePerCharacter,
+      price_per_megabyte: record.pricePerMegabyte,
       capabilities: {
         streaming: record.supportsStreaming,
         vision: record.supportsVision,

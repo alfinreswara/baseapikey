@@ -10,6 +10,9 @@ export interface ModelCatalogRecord {
   inputPricePerMillion: number;
   outputPricePerMillion: number;
   isFree: boolean;
+  pricePerImage: number | null;
+  pricePerCharacter: number | null;
+  pricePerMegabyte: number | null;
   supportsStreaming: boolean;
   supportsVision: boolean;
   supportsFunctionCalling: boolean;
@@ -56,6 +59,10 @@ export class PrismaModelCatalogRepository implements IModelCatalogRepository {
       inputPricePerMillion: model.inputPricePerMillion.toNumber(),
       outputPricePerMillion: model.outputPricePerMillion.toNumber(),
       isFree: model.isFree,
+      pricePerImage: model.pricePerImage === null ? null : model.pricePerImage.toNumber(),
+      pricePerCharacter:
+        model.pricePerCharacter === null ? null : model.pricePerCharacter.toNumber(),
+      pricePerMegabyte: model.pricePerMegabyte === null ? null : model.pricePerMegabyte.toNumber(),
       supportsStreaming: model.supportsStreaming,
       supportsVision: model.supportsVision,
       supportsFunctionCalling: model.supportsFunctionCalling,

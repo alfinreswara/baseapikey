@@ -16,6 +16,7 @@ import {
   type IOrganizationBillingGuard,
   requireAvailableBilling,
 } from '../billing/middleware/billing-usage.middleware';
+import type { CreditAuthorizationService } from '../billing/services/credit-authorization.service';
 import type { ModelCatalogService } from '../models/services/model-catalog.service';
 import type { ModelPolicyResolver } from '../models/services/model-policy.service';
 import type { ResilientProviderRouter } from '../providers/resilience/resilient-provider-router';
@@ -29,6 +30,8 @@ export interface InferenceRoutesOptions extends FastifyPluginOptions {
   providerRegistry: ProviderRegistry;
   /** Resolves the model, the provider, and the price before the request. */
   modelPolicyResolver?: ModelPolicyResolver;
+  /** Reserves the credit of the request before it reaches a provider. */
+  creditAuthorization?: CreditAuthorizationService;
   apiKeyRepository?: IApiKeyRepository;
   userRepository?: IUserRepository;
   quotaService?: QuotaService;
@@ -49,6 +52,9 @@ export async function inferenceRoutes(
   if (!options.modelPolicyResolver) {
     throw new Error('InferenceRoutes requires a modelPolicyResolver');
   }
+  if (!options.creditAuthorization) {
+    throw new Error('InferenceRoutes requires a creditAuthorization');
+  }
   const controller = new InferenceController(
     options.inferenceService ??
       new InferenceService(
@@ -58,6 +64,7 @@ export async function inferenceRoutes(
         options.modelCatalogService,
       ),
     options.modelPolicyResolver,
+    options.creditAuthorization,
   );
   const guards = (permission: ApiKeyPermission): preHandlerHookHandler[] => {
     const handlers = [authenticate, requireApiKeyPermission(permission)];

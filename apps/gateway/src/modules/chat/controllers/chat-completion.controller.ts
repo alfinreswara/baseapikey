@@ -1,16 +1,40 @@
+import { randomUUID } from 'node:crypto';
+
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import {
+  estimateMaxCostMicros,
   estimateModelCostUsd,
   type ModelPolicyResolver,
 } from '../../../modules/models/services/model-policy.service';
+import type { CreditAuthorizationService } from '../../billing/services/credit-authorization.service';
+import { RESERVATION_LIFETIME_MS } from '../../billing/services/reservation.service';
 import type { ChatCompletionChunkDTO } from '../dto/chat-completion.dto';
 import { validateChatCompletionRequest } from '../dto/chat-completion.dto';
 import type { ChatCompletionService } from '../services/chat-completion.service';
 
+/**
+ * The number of tokens of the prompt is not known before the provider
+ * processed the request. The size of the body is an upper bound, a token can
+ * not be shorter than a byte. The bound is only used for the reservation, the
+ * settlement uses the token counts of the provider.
+ */
+function estimatePromptTokenBound(request: FastifyRequest): number {
+  const contentLength = Number(request.headers['content-length'] ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > 0) {
+    return contentLength;
+  }
+  try {
+    return JSON.stringify(request.body ?? {}).length;
+  } catch {
+    return 0;
+  }
+}
+
 export function createChatCompletionController(
   chatService: ChatCompletionService,
   policyResolver: ModelPolicyResolver,
+  creditAuthorization: CreditAuthorizationService,
 ) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const dto = validateChatCompletionRequest(request.body);
@@ -19,12 +43,36 @@ export function createChatCompletionController(
     // costs. A model that is unknown or without a trusted price is rejected
     // before the request reaches a provider.
     const policy = await policyResolver.resolve(dto.model, dto.provider);
+    policyResolver.assertModality(policy, 'chat');
     dto.provider = policy.providerSlug;
     dto.model = policy.modelId;
+
+    // The credit of the request is reserved before it is forwarded to the
+    // provider. A request without a reservation is not sent to a provider.
+    // The usage key identifies the request, it is the idempotency key of the
+    // reservation and of the usage event.
+    const usageKey = randomUUID();
+    const organizationId = request.apiKey?.organizationId ?? null;
+    const reservationId = organizationId
+      ? await creditAuthorization.reserve({
+          organizationId,
+          apiKeyId: request.apiKey?.id ?? null,
+          requestId: request.id,
+          idempotencyKey: usageKey,
+          modality: 'chat',
+          amountMicros: estimateMaxCostMicros(policy, 'chat', {
+            promptTokens: estimatePromptTokenBound(request),
+            completionTokens: dto.max_tokens,
+          }),
+          expiresAt: new Date(Date.now() + RESERVATION_LIFETIME_MS),
+        })
+      : null;
 
     request.usageMetadata = {
       provider: policy.providerSlug,
       model: policy.modelId,
+      usageKey,
+      ...(reservationId ? { reservationId } : {}),
     };
 
     const abortController = new AbortController();
@@ -50,11 +98,10 @@ export function createChatCompletionController(
             promptTokens: responseDTO.usage.prompt_tokens,
             completionTokens: responseDTO.usage.completion_tokens,
             totalTokens: responseDTO.usage.total_tokens,
-            estimatedCost: estimateModelCostUsd(
-              policy,
-              responseDTO.usage.prompt_tokens,
-              responseDTO.usage.completion_tokens,
-            ),
+            estimatedCost: estimateModelCostUsd(policy, 'chat', {
+              promptTokens: responseDTO.usage.prompt_tokens,
+              completionTokens: responseDTO.usage.completion_tokens,
+            }),
           };
         }
         void reply.status(200).send(responseDTO);
@@ -97,11 +144,10 @@ export function createChatCompletionController(
             promptTokens: chunk.usage.prompt_tokens,
             completionTokens: chunk.usage.completion_tokens,
             totalTokens: chunk.usage.total_tokens,
-            estimatedCost: estimateModelCostUsd(
-              policy,
-              chunk.usage.prompt_tokens,
-              chunk.usage.completion_tokens,
-            ),
+            estimatedCost: estimateModelCostUsd(policy, 'chat', {
+              promptTokens: chunk.usage.prompt_tokens,
+              completionTokens: chunk.usage.completion_tokens,
+            }),
           };
         }
         const canContinue = reply.raw.write(payload);

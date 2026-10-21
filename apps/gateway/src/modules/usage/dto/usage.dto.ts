@@ -15,6 +15,8 @@ export const CreateUsageRecordSchema = z.object({
    * duplicates the usage row nor the charge.
    */
   usageKey: z.string().uuid(),
+  /** The reservation that holds the credit of the request. */
+  reservationId: z.string().uuid().nullable().optional(),
   promptTokens: z.number().int().nonnegative().default(0),
   completionTokens: z.number().int().nonnegative().default(0),
   totalTokens: z.number().int().nonnegative().default(0),

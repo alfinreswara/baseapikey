@@ -62,6 +62,9 @@ function catalogEntry(overrides: {
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
   isFree?: boolean;
+  pricePerImage?: number | null;
+  pricePerCharacter?: number | null;
+  pricePerMegabyte?: number | null;
   providerSlug?: string;
 }) {
   return {
@@ -74,6 +77,9 @@ function catalogEntry(overrides: {
     inputPricePerMillion: overrides.inputPricePerMillion ?? 3,
     outputPricePerMillion: overrides.outputPricePerMillion ?? 15,
     isFree: overrides.isFree ?? false,
+    pricePerImage: overrides.pricePerImage ?? null,
+    pricePerCharacter: overrides.pricePerCharacter ?? null,
+    pricePerMegabyte: overrides.pricePerMegabyte ?? null,
     supportsStreaming: true,
     supportsVision: false,
     supportsFunctionCalling: false,
