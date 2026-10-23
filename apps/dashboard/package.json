@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@baseapikey/config": "workspace:*",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^20.14.10",
     "tsx": "^4.23.15",
     "typescript": "^5.5.4"
